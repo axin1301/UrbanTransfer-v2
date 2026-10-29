@@ -94,7 +94,9 @@ def run(args):
         ys=[];ps=[];by_task={}
         for batch in DataLoader(ds,batch_size=args.batch_size,shuffle=False,num_workers=0):
             batch={k:v.to(device) if torch.is_tensor(v) else v for k,v in batch.items()}
-            knowledge=batch_knowledge(batch,provider,source_tasks,device)
+            knowledge=(batch_latent_knowledge(batch,provider,source_tasks,device)
+                       if args.provider=='qwen3vl-latent'
+                       else batch_knowledge(batch,provider,source_tasks,device))
             with torch.no_grad(): p=predictor(batch,knowledge)
             for target,pred,task in zip(batch['target'].tolist(),p.detach().cpu().tolist(),batch['task_name']):
                 ys.append(target);ps.append(pred)
