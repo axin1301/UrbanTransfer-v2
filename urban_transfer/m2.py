@@ -103,15 +103,25 @@ def train(args):
             raise ValueError('Cannot resume with different source tasks')
         if ckpt['meta']['provider'] != args.provider or ckpt['meta']['model_id'] != args.model_id:
             raise ValueError('Cannot resume with different provider/model')
-        start=int(ckpt['epoch']);best=ckpt.get('best_val') or float('inf')
+        start=int(ckpt['epoch']);best=ckpt.get('best_val') if ckpt.get('best_val') is not None else float('inf')
     # Validation is a held-out subset of seen-city/source-task training data.
     # It is NOT any of the SCUI/UCSI/UCUI test splits.
     if not 0<args.val_fraction<0.5:raise ValueError('--val-fraction must be (0, 0.5)')
     if len(ds)<3:raise ValueError('Need at least 3 samples to split train/validation')
+    # Split by city + tile ID, not by CSV row: the same tile can have many task labels.
+    if 'image_name' not in ds.df.columns:
+        raise ValueError('image_name required for group-aware validation')
+    group_col=(ds.df['city'].astype(str)+'::'+ds.df['image_name'].astype(str))
+    unique_groups=np.array(sorted(set(group_col)))
+    if len(unique_groups)<2:raise ValueError('Need >=2 distinct city/tile groups for validation')
     rng=np.random.default_rng(args.seed)
-    order=rng.permutation(len(ds));n_val=max(1,int(len(ds)*args.val_fraction))
-    if n_val>=len(ds):raise ValueError('Empty train partition')
-    tr=Subset(ds,order[n_val:].tolist());val=Subset(ds,order[:n_val].tolist())
+    rng.shuffle(unique_groups)
+    n_val=max(1,int(len(unique_groups)*args.val_fraction))
+    n_val=min(n_val,len(unique_groups)-1)
+    validation_groups=set(unique_groups[:n_val])
+    val_indices=[i for i,g in enumerate(group_col) if g in validation_groups]
+    train_indices=[i for i,g in enumerate(group_col) if g not in validation_groups]
+    tr=Subset(ds,train_indices);val=Subset(ds,val_indices)
     if args.resume and start>=args.epochs:
         print(f'Already reached epoch {start}; no further training required')
         return
