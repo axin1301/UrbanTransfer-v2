@@ -4,7 +4,7 @@ p=argparse.ArgumentParser(description='UrbanTransfer M1 real online Qwen3-VL tra
 p.add_argument('--train-csv',required=True);p.add_argument('--scui-csv');p.add_argument('--ucsi-csv');p.add_argument('--ucui-csv')
 p.add_argument('--image-root',default=None,help='Base directory for image_name or relative image paths')
 p.add_argument('--image-column',default=None,help='CSV column containing explicit absolute or relative image file paths');p.add_argument('--output',default='runs/m1')
-p.add_argument('--provider',choices=['qwen3vl','mock'],default='qwen3vl')
+p.add_argument('--provider',choices=['qwen3vl-latent','qwen3vl','mock'],default='qwen3vl-latent')
 p.add_argument('--model-id',default='Qwen/Qwen3-VL-2B-Instruct')
 p.add_argument('--epochs',type=int,default=1);p.add_argument('--batch-size',type=int,default=4)
 p.add_argument('--limit',type=int);p.add_argument('--seed',type=int,default=42)
