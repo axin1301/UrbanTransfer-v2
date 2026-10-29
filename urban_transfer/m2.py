@@ -45,11 +45,14 @@ def obtain_knowledge(batch,args,provider,source_tasks,device,cache):
         return torch.stack(result).to(device,dtype=torch.float32)
     return resolve_batch_knowledge(batch,provider,source_tasks,device,args.provider)
 
-def loop(model,ds,args,provider,source_tasks,device,cache,optimizer=None):
+def loop(model,ds,args,provider,source_tasks,device,cache,optimizer=None,split_name=None):
     train=optimizer is not None
     model.train(train)
     loader=DataLoader(ds,batch_size=args.batch_size,shuffle=train,num_workers=0)
     truth=[];prediction=[];groups={};loss_sum=0.
+    done=0
+    if split_name:
+        print(f'[eval] {split_name}: {len(ds)} rows, provider={args.provider}, cache={cache.enabled}',flush=True)
     for batch in loader:
         batch={k:v.to(device) if torch.is_tensor(v) else v for k,v in batch.items()}
         knowledge=obtain_knowledge(batch,args,provider,source_tasks,device,cache)
@@ -59,6 +62,9 @@ def loop(model,ds,args,provider,source_tasks,device,cache,optimizer=None):
             if train:
                 optimizer.zero_grad();loss.backward();optimizer.step()
         count=len(batch['task_name']);loss_sum+=float(loss.item())*count
+        done+=count
+        if split_name and (done % max(args.batch_size*10,1) < count or done==len(ds)):
+            print(f'[eval] {split_name}: {done}/{len(ds)} rows',flush=True)
         if not train:
             for actual,pred,city,task in zip(batch['target'].detach().cpu().tolist(),
                   y.detach().cpu().tolist(),batch['city'],batch['task_name']):
@@ -149,8 +155,10 @@ def evaluate(args):
     args.task_dim=original['task_dim'];args.visual_dim=original['visual_dim']
     args.hidden_dim=original['hidden_dim'];args.experts=original['n_experts'];args.top_k=original['top_k']
     source_tasks=tuple(meta['source_tasks'])
+    print(f'[eval] loading provider={args.provider} model={args.model_id}',flush=True)
     cfg,provider,model,device,cache=make_components(args,source_tasks)
     load_checkpoint(args.checkpoint,model=model,device=device)
+    print('[eval] checkpoint loaded',flush=True)
     names={'SCUI':args.scui_csv,'UCSI':args.ucsi_csv,'UCUI':args.ucui_csv}
     datasets={key:data_from_path(value,args,'eval') for key,value in names.items() if value}
     if not datasets:raise ValueError('Provide at least one test split CSV')
@@ -158,7 +166,7 @@ def evaluate(args):
     if args.train_csv:
         train_df=data_from_path(args.train_csv,args,'train').df
         check_splits(train_df,{name:ds.df for name,ds in datasets.items()})
-    results={name:loop(model,ds,args,provider,source_tasks,device,cache) for name,ds in datasets.items()}
+    results={name:loop(model,ds,args,provider,source_tasks,device,cache,split_name=name) for name,ds in datasets.items()}
     out=Path(args.output);out.mkdir(parents=True,exist_ok=True)
     (out/'metrics.json').write_text(json.dumps(results,indent=2))
     for name,result in results.items():print(name,result['overall'],flush=True)
