@@ -11,10 +11,14 @@ from .qwen3vl import Qwen3VLProvider
 from .data_m1 import ImageUrbanDataset
 
 class Predictor(torch.nn.Module):
-    def __init__(self,cfg):
+    def __init__(self,cfg,latent_dim=None):
         super().__init__();self.vision=SmallVisionEncoder(cfg.visual_dim);self.transfer=TransferModel(cfg)
+        self.latent_projection=(torch.nn.Sequential(torch.nn.LayerNorm(latent_dim),torch.nn.Linear(latent_dim,cfg.n_sources+4)) if latent_dim is not None else None)
     def forward(self,b,knowledge):
-        visual=self.vision(b['image']);return self.transfer(visual,b['context'],b['task'],knowledge)
+        visual=self.vision(b['image'])
+        if self.latent_projection is not None:
+            knowledge=torch.sigmoid(self.latent_projection(knowledge.float()))
+        return self.transfer(visual,b['context'],b['task'],knowledge)
 
 def batch_knowledge(batch,provider,source_tasks,device):
     data=[]
@@ -22,6 +26,16 @@ def batch_knowledge(batch,provider,source_tasks,device):
         k=provider.infer(image_path=path,city=city,task_description=desc,source_tasks=source_tasks)
         data.append(k.relevance+k.morphology+[k.uncertainty])
     return torch.tensor(data,dtype=torch.float32,device=device)
+
+def batch_latent_knowledge(batch,provider,source_tasks,device):
+    """Qwen forward without generation; output remains frozen, adapter trainable."""
+    vectors=[]
+    for city,path,desc in zip(batch['city'],batch['image_path'],batch['task_description']):
+        vectors.append(provider.infer_hidden(image_path=path,city=city,
+                                             task_description=desc,source_tasks=source_tasks))
+    if not vectors:
+        raise ValueError('Empty MLLM batch')
+    return torch.stack(vectors).to(device,dtype=torch.float32)
 
 def metrics(y,p):
     a=np.array(y,dtype=float);b=np.array(p,dtype=float)
@@ -32,14 +46,14 @@ def metrics(y,p):
 
 def build_provider(mode,model_id):
     if mode=='mock': return MockProvider()
-    if mode=='qwen3vl': return Qwen3VLProvider(model_id=model_id)
+    if mode in ('qwen3vl','qwen3vl-latent'): return Qwen3VLProvider(model_id=model_id)
     raise ValueError(mode)
 
 def run(args):
     torch.manual_seed(args.seed);np.random.seed(args.seed)
     device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    if args.provider=='qwen3vl' and device.type!='cuda': raise RuntimeError('Qwen3-VL mode requires ROCm GPU.')
-    if args.provider=='qwen3vl' and args.allow_missing_images: raise ValueError('Cannot use Qwen3-VL with missing images')
+    if args.provider in ('qwen3vl','qwen3vl-latent') and device.type!='cuda': raise RuntimeError('Qwen3-VL mode requires ROCm GPU.')
+    if args.provider in ('qwen3vl','qwen3vl-latent') and args.allow_missing_images: raise ValueError('Cannot use Qwen3-VL with missing images')
     paths={'train':args.train_csv,'SCUI':args.scui_csv,'UCSI':args.ucsi_csv,'UCUI':args.ucui_csv}
     datasets={name:ImageUrbanDataset(path,args.image_root,partition='train' if name=='train' else 'eval',
                 limit=args.limit,require_images=not args.allow_missing_images,image_column=args.image_column) for name,path in paths.items() if path}
@@ -54,9 +68,10 @@ def run(args):
     source_tasks=tuple(sorted(train_tasks))
     cfg=ModelConfig(use_knowledge=True,n_sources=len(source_tasks),task_dim=args.task_dim,visual_dim=args.visual_dim,
            hidden_dim=args.hidden_dim,n_experts=args.experts,top_k=args.top_k)
-    predictor=Predictor(cfg).to(device)
-    optimizer=torch.optim.AdamW(predictor.parameters(),lr=args.lr,weight_decay=1e-4)
     provider=build_provider(args.provider,args.model_id)
+    latent_dim=(provider.model.config.text_config.hidden_size if args.provider=='qwen3vl-latent' else None)
+    predictor=Predictor(cfg,latent_dim=latent_dim).to(device)
+    optimizer=torch.optim.AdamW(predictor.parameters(),lr=args.lr,weight_decay=1e-4)
     out=Path(args.output);out.mkdir(parents=True,exist_ok=True)
     meta={'source_tasks':source_tasks,'provider':args.provider,'model_id':args.model_id,'source_data':paths,'seed':args.seed,
           'task_vectors':'deterministic hash bag-of-words baseline (not pretrained semantics)', 'image_root':args.image_root, 'image_column':args.image_column}
@@ -66,7 +81,9 @@ def run(args):
         loader=DataLoader(datasets['train'],batch_size=args.batch_size,shuffle=True,num_workers=0)
         for batch in loader:
             batch={k:v.to(device) if torch.is_tensor(v) else v for k,v in batch.items()}
-            knowledge=batch_knowledge(batch,provider,source_tasks,device)
+            knowledge=(batch_latent_knowledge(batch,provider,source_tasks,device)
+                       if args.provider=='qwen3vl-latent'
+                       else batch_knowledge(batch,provider,source_tasks,device))
             y=predictor(batch,knowledge);loss=torch.nn.functional.mse_loss(y,batch['target'])
             optimizer.zero_grad();loss.backward();optimizer.step();losses.append(loss.item())
         print(f'epoch={epoch+1} mean_mse_loss={np.mean(losses):.5f}',flush=True)
