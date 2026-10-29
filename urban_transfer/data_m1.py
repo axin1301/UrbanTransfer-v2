@@ -55,9 +55,13 @@ class ImageUrbanDataset(Dataset):
                 raise FileNotFoundError(f'Explicit image path {raw!r} not found; checked: {candidates}')
             raise ValueError(f'Empty image path for row city={r.city}, task={r.indicator_column}')
         filename=Path(str(r.image_name))
-        candidates=[self.root/filename,self.root/str(r.city)/filename]
+        candidates=[self.root/filename]
+        city_names=[str(r.city)]
         if 'city_query' in r and pd.notna(r.city_query):
-            candidates.append(self.root/str(r.city_query)/filename)
+            city_names.append(str(r.city_query))
+        for city_name in dict.fromkeys(city_names):
+            candidates.extend([self.root/city_name/filename,
+                               self.root/city_name/'arcgis-imagery-FUA'/filename])
         for candidate in candidates:
             if candidate.is_file():return candidate.resolve()
         raise FileNotFoundError(f'Image not found for city={r.city}, image={filename}; checked {candidates}')
