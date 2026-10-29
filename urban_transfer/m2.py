@@ -9,6 +9,7 @@ from .data_m1 import ImageUrbanDataset
 from .engine import Predictor,build_provider,resolve_batch_knowledge,metrics
 from .model import ModelConfig
 from .cache import HiddenStateCache
+from .ablations import PermutedKnowledgeDataset
 from .checkpoints import save_checkpoint,load_checkpoint
 
 def seed_all(seed):
@@ -26,28 +27,38 @@ def source_info(df):
     return tasks
 
 def make_components(args,source_tasks):
-    cfg=ModelConfig(use_knowledge=True,n_sources=len(source_tasks),
+    cfg=ModelConfig(use_knowledge=(args.provider!='no-llm'),n_sources=len(source_tasks),
         task_dim=args.task_dim,visual_dim=args.visual_dim,hidden_dim=args.hidden_dim,
         n_experts=args.experts,top_k=args.top_k)
-    provider=build_provider(args.provider,args.model_id)
-    latent_dim=provider.model.config.text_config.hidden_size if args.provider=='qwen3vl-latent' else None
+    provider=(None if args.provider=='no-llm' else build_provider('qwen3vl-latent' if args.provider=='shuffled-latent' else args.provider,args.model_id))
+    latent_dim=provider.model.config.text_config.hidden_size if args.provider in ('qwen3vl-latent','shuffled-latent') else None
     device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    if args.provider!='mock' and device.type!='cuda':raise RuntimeError('Real Qwen3-VL requires GPU')
+    if args.provider not in ('mock','no-llm') and device.type!='cuda':raise RuntimeError('Real Qwen3-VL requires GPU')
     model=Predictor(cfg,latent_dim=latent_dim).to(device)
-    cache=HiddenStateCache(args.cache_dir,args.model_id,enabled=(args.provider=='qwen3vl-latent' and not args.no_cache))
+    cache=HiddenStateCache(args.cache_dir,args.model_id,enabled=(args.provider in ('qwen3vl-latent','shuffled-latent') and not args.no_cache))
     return cfg,provider,model,device,cache
 
 def obtain_knowledge(batch,args,provider,source_tasks,device,cache):
-    if args.provider=='qwen3vl-latent' and cache.enabled:
+    if args.provider=='no-llm':
+        return None
+    if args.provider=='shuffled-latent':
+        batch=dict(batch)
+        batch['image_path']=batch['knowledge_image_path']
+        batch['city']=batch['knowledge_city']
+        batch['task_description']=batch['knowledge_task_description']
+    if args.provider in ('qwen3vl-latent','shuffled-latent') and cache.enabled:
         result=[cache.get_or_compute(provider=provider,image_path=path,city=city,task_description=description,
                     source_tasks=source_tasks)
                 for city,path,description in zip(batch['city'],batch['image_path'],batch['task_description'])]
         return torch.stack(result).to(device,dtype=torch.float32)
-    return resolve_batch_knowledge(batch,provider,source_tasks,device,args.provider)
+    return resolve_batch_knowledge(batch,provider,source_tasks,device,
+                                   'qwen3vl-latent' if args.provider=='shuffled-latent' else args.provider)
 
 def loop(model,ds,args,provider,source_tasks,device,cache,optimizer=None,split_name=None):
     train=optimizer is not None
     model.train(train)
+    if args.provider=='shuffled-latent':
+        ds=PermutedKnowledgeDataset(ds,seed=args.seed+({'train':0,'validation':1}.get(split_name,2)))
     loader=DataLoader(ds,batch_size=args.batch_size,shuffle=train,num_workers=0)
     truth=[];prediction=[];groups={};loss_sum=0.
     done=0
@@ -92,7 +103,8 @@ def get_meta(args,source_tasks):
     return {'provider':args.provider,'model_id':args.model_id,'source_tasks':list(source_tasks),
         'seed':args.seed,'train_csv':str(Path(args.train_csv).resolve()),
         'image_root':args.image_root,'image_column':args.image_column,
-        'config_schema':'m2.1','cache_enabled':not args.no_cache}
+        'config_schema':'m2.2','cache_enabled':not args.no_cache,
+        'val_fraction':args.val_fraction,'limit':args.limit}
 
 def train(args):
     seed_all(args.seed)
@@ -109,6 +121,9 @@ def train(args):
             raise ValueError('Cannot resume with different source tasks')
         if ckpt['meta']['provider'] != args.provider or ckpt['meta']['model_id'] != args.model_id:
             raise ValueError('Cannot resume with different provider/model')
+        for key in ('seed','train_csv','val_fraction','limit'):
+            if ckpt['meta'].get(key) != metadata.get(key):
+                raise ValueError(f'Cannot resume: {key} changed')
         start=int(ckpt['epoch']);best=ckpt.get('best_val') if ckpt.get('best_val') is not None else float('inf')
     # Validation is a held-out subset of seen-city/source-task training data.
     # It is NOT any of the SCUI/UCSI/UCUI test splits.
@@ -133,7 +148,7 @@ def train(args):
         return
     for ep in range(start,args.epochs):
         train_stats=loop(model,tr,args,provider,source_tasks,device,cache,optimizer)
-        val_stats=loop(model,val,args,provider,source_tasks,device,cache)
+        val_stats=loop(model,val,args,provider,source_tasks,device,cache,split_name='validation')
         val_mse=val_stats['overall']['mse']
         is_best=val_mse is not None and val_mse<best
         if is_best:best=val_mse
