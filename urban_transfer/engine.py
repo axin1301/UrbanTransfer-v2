@@ -37,6 +37,12 @@ def batch_latent_knowledge(batch,provider,source_tasks,device):
         raise ValueError('Empty MLLM batch')
     return torch.stack(vectors).to(device,dtype=torch.float32)
 
+def resolve_batch_knowledge(batch, provider, source_tasks, device, mode):
+    """Use the same provider interface during training AND evaluation."""
+    if mode == 'qwen3vl-latent':
+        return batch_latent_knowledge(batch, provider, source_tasks, device)
+    return batch_knowledge(batch, provider, source_tasks, device)
+
 def metrics(y,p):
     a=np.array(y,dtype=float);b=np.array(p,dtype=float)
     if not len(a):return {'n':0,'mse':None,'mae':None,'r2':None}
@@ -81,9 +87,7 @@ def run(args):
         loader=DataLoader(datasets['train'],batch_size=args.batch_size,shuffle=True,num_workers=0)
         for batch in loader:
             batch={k:v.to(device) if torch.is_tensor(v) else v for k,v in batch.items()}
-            knowledge=(batch_latent_knowledge(batch,provider,source_tasks,device)
-                       if args.provider=='qwen3vl-latent'
-                       else batch_knowledge(batch,provider,source_tasks,device))
+            knowledge=resolve_batch_knowledge(batch,provider,source_tasks,device,args.provider)
             y=predictor(batch,knowledge);loss=torch.nn.functional.mse_loss(y,batch['target'])
             optimizer.zero_grad();loss.backward();optimizer.step();losses.append(loss.item())
         print(f'epoch={epoch+1} mean_mse_loss={np.mean(losses):.5f}',flush=True)
@@ -94,9 +98,7 @@ def run(args):
         ys=[];ps=[];by_task={}
         for batch in DataLoader(ds,batch_size=args.batch_size,shuffle=False,num_workers=0):
             batch={k:v.to(device) if torch.is_tensor(v) else v for k,v in batch.items()}
-            knowledge=(batch_latent_knowledge(batch,provider,source_tasks,device)
-                       if args.provider=='qwen3vl-latent'
-                       else batch_knowledge(batch,provider,source_tasks,device))
+            knowledge=resolve_batch_knowledge(batch,provider,source_tasks,device,args.provider)
             with torch.no_grad(): p=predictor(batch,knowledge)
             for target,pred,task in zip(batch['target'].tolist(),p.detach().cpu().tolist(),batch['task_name']):
                 ys.append(target);ps.append(pred)
