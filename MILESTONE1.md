@@ -50,3 +50,30 @@ The original distributed CSV files contain six source and four target indicators
 - An empty/missing image path causes an error for actual Qwen inference.
 
 Outputs: `last.pt`, `run_metadata.json`, `metrics.json`.
+
+
+## M1.2 — Latent Qwen3-VL knowledge (recommended)
+
+**Default provider is now `qwen3vl-latent`.** Instead of generating text/JSON, Qwen3-VL makes a single frozen multimodal forward pass on the real image, region and target task prompt. The resulting pooled hidden state passes through a **trainable projection** into the expert-routing knowledge space. This removes the brittle JSON schema constraint, and no output is interpreted as a calibrated numeric relevance score.
+
+Use the same CLI as M1.1, but prefer:
+
+```bash
+python train_m1.py --train-csv /path/train.csv --scui-csv /path/scui.csv \
+  --ucsi-csv /path/ucsi.csv --ucui-csv /path/ucui.csv \
+  --image-root /flash/project_462001391/xiyanxin/Urban_experience/output_files \
+  --provider qwen3vl-latent --model-id Qwen/Qwen3-VL-2B-Instruct \
+  --limit 12 --epochs 1 --batch-size 2 --output runs/qwen_latent_smoke
+```
+
+`--provider qwen3vl` retains explicit JSON mode only for ablation. `--provider mock` is synthetic.
+
+Test the new integration without downloading weights:
+
+```bash
+python -m unittest discover -s tests -p "test_latent.py" -v
+```
+
+**Validation status:** code committed, CPU-only mock latent tests provided, but not tested against actual Qwen3-VL model weights or MI250X. Online MLLM remains frozen, and its hidden-state projection, vision CNN, experts and regressors are trainable.
+
+**Important scientific limitation:** these hidden states are not provably an explicit representation of geographic *knowledge*, and the current architecture does not guarantee transferability decisions. Follow-up controls should compare against random/frozen task-conditioned representations and no-LLM baselines, and add specialist/reward-supervised routing.
