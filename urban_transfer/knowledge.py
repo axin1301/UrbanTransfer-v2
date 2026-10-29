@@ -62,3 +62,38 @@ class TransformersVisionProvider:
             raise ValueError(f'MLLM output is not JSON: {str(raw)[:250]}')
         obj = json.loads(match.group(0))
         return Knowledge(**{k:obj[k] for k in ('relevance','morphology','uncertainty','explanation')}).validate(len(source_tasks))
+
+
+def parse_knowledge_json(raw: str, n_tasks: int) -> Knowledge:
+    """Parse fenced or plain JSON, fail closed on truncation and schema mismatch."""
+    if not isinstance(raw, str):
+        raise ValueError("Model response must be a string")
+    start = raw.find('{')
+    end = raw.rfind('}')
+    if start < 0 or end < start:
+        raise ValueError("No complete JSON object (possibly truncated generation)")
+    try:
+        payload = json.loads(raw[start:end + 1])
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Malformed or truncated JSON: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("JSON root must be an object")
+    relevance = payload.get('relevance')
+    morphology = payload.get('morphology')
+    uncertainty = payload.get('uncertainty')
+    if not isinstance(relevance, list):
+        raise ValueError("relevance MUST be an array, not a scalar")
+    if not isinstance(morphology, list):
+        raise ValueError("morphology MUST be an array")
+    if type(uncertainty) not in (int, float):
+        raise ValueError("uncertainty MUST be a number")
+    if len(relevance) != n_tasks:
+        raise ValueError(f"Expected {n_tasks} relevance entries, got {len(relevance)}")
+    if len(morphology) != 3:
+        raise ValueError(f"Expected 3 morphology entries, got {len(morphology)}")
+    if not all(type(x) in (int, float) for x in relevance + morphology):
+        raise ValueError("All relevance and morphology values must be numbers")
+    explanation = payload.get('explanation', '')
+    if not isinstance(explanation, str):
+        raise ValueError("explanation must be a string")
+    return Knowledge(relevance, morphology, float(uncertainty), explanation).validate(n_tasks)
