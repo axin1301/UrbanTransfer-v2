@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+.env
+data/
+runs/
+checkpoints/
+*.pt
+*.pth
+*.safetensors
+.DS_Store
