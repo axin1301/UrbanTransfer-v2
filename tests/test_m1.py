@@ -28,7 +28,7 @@ class TestM1(unittest.TestCase):
             root=Path(d);image=root/'actual.png';Image.new('RGB',(16,16),(120,80,40)).save(image)
             f=root/'data.csv';pd.DataFrame([row(image_name='not_actual.png',image_path=str(image))]).to_csv(f,index=False)
             ds=ImageUrbanDataset(f,None,image_column='image_path')
-            self.assertEqual(ds[0]['image_path'],str(image))
+            self.assertEqual(Path(ds[0]['image_path']).resolve(), image.resolve())
             self.assertEqual(tuple(ds[0]['image'].shape),(3,224,224))
     def test_relative_image_column(self):
         with tempfile.TemporaryDirectory() as d:
