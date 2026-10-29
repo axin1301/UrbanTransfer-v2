@@ -65,3 +65,43 @@ class Qwen3VLProvider:
                     inputs = {k:v.to(self.device) if hasattr(v,'to') else v
                               for k,v in inputs.items()}
         raise ValueError("Qwen3-VL failed strict JSON validation after retry: " + " | ".join(errors))
+
+    @torch.inference_mode()
+    def infer_hidden(self, *, image_path, city, task_description, source_tasks):
+        """Return an image-and-instruction-conditioned hidden vector, WITHOUT text generation."""
+        from PIL import Image
+        if not image_path or not Path(image_path).is_file():
+            raise FileNotFoundError(f'Qwen requires real image: {image_path}')
+        with Image.open(image_path) as im:
+            image = im.convert('RGB')
+        prompt = (
+            "Study the supplied satellite image and task definition. Consider which "
+            "source indicators may transfer useful knowledge in this urban setting. "
+            "Do not guess indicator labels or facility counts. "
+            f"City: {city}. Target: {task_description}. "
+            f"Source indicators: {list(source_tasks)}. "
+            "Represent the image-conditioned task and geography for transfer."
+        )
+        messages = [{'role':'user','content':[
+            {'type':'image','image':image,'max_pixels':self.max_pixels},
+            {'type':'text','text':prompt}]}]
+        inputs = self.processor.apply_chat_template(
+            messages, tokenize=True, add_generation_prompt=True,
+            return_dict=True, return_tensors='pt'
+        )
+        inputs.pop('token_type_ids', None)
+        inputs = {k:v.to(self.device) if hasattr(v,'to') else v for k,v in inputs.items()}
+        # Use the underlying multimodal backbone to avoid the vocabulary logits and
+        # long output_hidden_states tuple. Qwen3VLForConditionalGeneration.model
+        # returns BaseModelOutputWithPast with last_hidden_state.
+        outputs = self.model.model(**inputs, use_cache=False, return_dict=True)
+        hidden = outputs.last_hidden_state
+        if hidden is None or hidden.ndim != 3:
+            raise RuntimeError('Qwen did not return [B, sequence, hidden] states')
+        attention = inputs.get('attention_mask')
+        if attention is None:
+            pooled = hidden.mean(dim=1)
+        else:
+            mask = attention.to(hidden.dtype).unsqueeze(-1)
+            pooled = (hidden * mask).sum(dim=1) / mask.sum(dim=1).clamp_min(1)
+        return pooled[0].detach().float().cpu()
