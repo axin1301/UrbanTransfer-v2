@@ -1,0 +1,15 @@
+import argparse
+from urban_transfer.engine import run
+p=argparse.ArgumentParser(description='UrbanTransfer M1 real online Qwen3-VL train/eval')
+p.add_argument('--train-csv',required=True);p.add_argument('--scui-csv');p.add_argument('--ucsi-csv');p.add_argument('--ucui-csv')
+p.add_argument('--image-root',default=None,help='Base directory for image_name or relative image paths')
+p.add_argument('--image-column',default=None,help='CSV column containing explicit absolute or relative image file paths');p.add_argument('--output',default='runs/m1')
+p.add_argument('--provider',choices=['qwen3vl','mock'],default='qwen3vl')
+p.add_argument('--model-id',default='Qwen/Qwen3-VL-2B-Instruct')
+p.add_argument('--epochs',type=int,default=1);p.add_argument('--batch-size',type=int,default=4)
+p.add_argument('--limit',type=int);p.add_argument('--seed',type=int,default=42)
+p.add_argument('--lr',type=float,default=1e-3);p.add_argument('--task-dim',type=int,default=128)
+p.add_argument('--visual-dim',type=int,default=768);p.add_argument('--hidden-dim',type=int,default=128)
+p.add_argument('--experts',type=int,default=6);p.add_argument('--top-k',type=int,default=2)
+p.add_argument('--allow-missing-images',action='store_true',help='ONLY mock pipeline smoke test. Not real experiment.')
+if __name__=='__main__':run(p.parse_args())
