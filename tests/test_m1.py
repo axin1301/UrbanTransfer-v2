@@ -36,6 +36,18 @@ class TestM1(unittest.TestCase):
             f=root/'data.csv';pd.DataFrame([row(image_name='wrong.png',image_path='imgs/x.png')]).to_csv(f,index=False)
             ds=ImageUrbanDataset(f,None,image_column='image_path')
             self.assertEqual(ds[0]['image_path'],str((root/'imgs'/'x.png').resolve()))
+    def test_arcgis_imagery_fua_city_layout(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d)
+            folder=root/'Adana'/'arcgis-imagery-FUA'
+            folder.mkdir(parents=True)
+            image=folder/'6373_9792.png'
+            Image.new('RGB',(16,16),(120,80,40)).save(image)
+            csv_file=root/'train.csv'
+            pd.DataFrame([row(city='Adana',image_name='6373_9792.png')]).to_csv(csv_file,index=False)
+            ds=ImageUrbanDataset(csv_file,root)
+            self.assertEqual(Path(ds[0]['image_path']).resolve(), image.resolve())
+
     def test_target_label_leakage(self):
         with tempfile.TemporaryDirectory() as d:
             f=Path(d)/'a.csv';pd.DataFrame([row(indicator_column='healthcare_accessibility',indicator_split='test_indicator')]).to_csv(f,index=False)
