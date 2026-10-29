@@ -1,0 +1,155 @@
+"""M2 runner: separate training and evaluation, frozen MLLM cache and checkpoint resume."""
+from pathlib import Path
+import json
+import random
+import numpy as np
+import torch
+from torch.utils.data import DataLoader,Subset
+from .data_m1 import ImageUrbanDataset
+from .engine import Predictor,build_provider,resolve_batch_knowledge,metrics
+from .model import ModelConfig
+from .cache import HiddenStateCache
+from .checkpoints import save_checkpoint,load_checkpoint
+
+def seed_all(seed):
+    random.seed(seed);np.random.seed(seed);torch.manual_seed(seed)
+    if torch.cuda.is_available(): torch.cuda.manual_seed_all(seed)
+
+def data_from_path(path,args,partition):
+    return ImageUrbanDataset(path,args.image_root,partition=partition,limit=args.limit,
+        task_dim=args.task_dim,require_images=not args.allow_missing_images,
+        image_column=args.image_column)
+
+def source_info(df):
+    tasks=tuple(sorted(set(df.indicator_column)))
+    if not tasks:raise ValueError('No source tasks')
+    return tasks
+
+def make_components(args,source_tasks):
+    cfg=ModelConfig(use_knowledge=True,n_sources=len(source_tasks),
+        task_dim=args.task_dim,visual_dim=args.visual_dim,hidden_dim=args.hidden_dim,
+        n_experts=args.experts,top_k=args.top_k)
+    provider=build_provider(args.provider,args.model_id)
+    latent_dim=provider.model.config.text_config.hidden_size if args.provider=='qwen3vl-latent' else None
+    device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    if args.provider!='mock' and device.type!='cuda':raise RuntimeError('Real Qwen3-VL requires GPU')
+    model=Predictor(cfg,latent_dim=latent_dim).to(device)
+    cache=HiddenStateCache(args.cache_dir,args.model_id,enabled=(args.provider=='qwen3vl-latent' and not args.no_cache))
+    return cfg,provider,model,device,cache
+
+def obtain_knowledge(batch,args,provider,source_tasks,device,cache):
+    if args.provider=='qwen3vl-latent' and cache.enabled:
+        result=[cache.get_or_compute(provider=provider,image_path=path,city=city,task_description=description,
+                    source_tasks=source_tasks)
+                for city,path,description in zip(batch['city'],batch['image_path'],batch['task_description'])]
+        return torch.stack(result).to(device,dtype=torch.float32)
+    return resolve_batch_knowledge(batch,provider,source_tasks,device,args.provider)
+
+def loop(model,ds,args,provider,source_tasks,device,cache,optimizer=None):
+    train=optimizer is not None
+    model.train(train)
+    loader=DataLoader(ds,batch_size=args.batch_size,shuffle=train,num_workers=0)
+    truth=[];prediction=[];groups={};loss_sum=0.
+    for batch in loader:
+        batch={k:v.to(device) if torch.is_tensor(v) else v for k,v in batch.items()}
+        knowledge=obtain_knowledge(batch,args,provider,source_tasks,device,cache)
+        with torch.set_grad_enabled(train):
+            y=model(batch,knowledge)
+            loss=torch.nn.functional.mse_loss(y,batch['target'])
+            if train:
+                optimizer.zero_grad();loss.backward();optimizer.step()
+        count=len(batch['task_name']);loss_sum+=float(loss.item())*count
+        if not train:
+            for actual,pred,city,task in zip(batch['target'].detach().cpu().tolist(),
+                  y.detach().cpu().tolist(),batch['city'],batch['task_name']):
+                truth.append(actual);prediction.append(pred)
+                key=(city,task);groups.setdefault(key,([],[]))
+                groups[key][0].append(actual);groups[key][1].append(pred)
+    if train:return {'mean_mse':loss_sum/max(len(ds),1),'n':len(ds)}
+    per_city={};per_task={}
+    for (city,task),(ys,ps) in groups.items():
+        cy=per_city.setdefault(city,([],[]));cy[0].extend(ys);cy[1].extend(ps)
+        tt=per_task.setdefault(task,([],[]));tt[0].extend(ys);tt[1].extend(ps)
+    return {'overall':metrics(truth,prediction),
+            'per_city':{k:metrics(*v) for k,v in per_city.items()},
+            'per_task':{k:metrics(*v) for k,v in per_task.items()}}
+
+def check_splits(train_df,others):
+    train_cities=set(train_df.city);train_tasks=set(train_df.indicator_column)
+    for name,df in others.items():
+        if name in ('UCSI','UCUI') and train_cities.intersection(set(df.city)):
+            raise ValueError(f'City leakage in {name}')
+        if name in ('SCUI','UCUI') and train_tasks.intersection(set(df.indicator_column)):
+            raise ValueError(f'Task leakage in {name}')
+
+def get_meta(args,source_tasks):
+    return {'provider':args.provider,'model_id':args.model_id,'source_tasks':list(source_tasks),
+        'seed':args.seed,'train_csv':str(Path(args.train_csv).resolve()),
+        'image_root':args.image_root,'image_column':args.image_column,
+        'config_schema':'m2.1','cache_enabled':not args.no_cache}
+
+def train(args):
+    seed_all(args.seed)
+    ds=data_from_path(args.train_csv,args,'train')
+    source_tasks=source_info(ds.df)
+    cfg,provider,model,device,cache=make_components(args,source_tasks)
+    optimizer=torch.optim.AdamW(model.parameters(),lr=args.lr,weight_decay=1e-4)
+    out=Path(args.output);out.mkdir(parents=True,exist_ok=True)
+    metadata=get_meta(args,source_tasks)
+    start=0;best=float('inf')
+    if args.resume:
+        ckpt=load_checkpoint(args.resume,model=model,optimizer=optimizer,restore_rng=True,device=device)
+        if ckpt['meta']['source_tasks'] != list(source_tasks):
+            raise ValueError('Cannot resume with different source tasks')
+        if ckpt['meta']['provider'] != args.provider or ckpt['meta']['model_id'] != args.model_id:
+            raise ValueError('Cannot resume with different provider/model')
+        start=int(ckpt['epoch']);best=ckpt.get('best_val') or float('inf')
+    # Validation is a held-out subset of seen-city/source-task training data.
+    # It is NOT any of the SCUI/UCSI/UCUI test splits.
+    if not 0<args.val_fraction<0.5:raise ValueError('--val-fraction must be (0, 0.5)')
+    if len(ds)<3:raise ValueError('Need at least 3 samples to split train/validation')
+    rng=np.random.default_rng(args.seed)
+    order=rng.permutation(len(ds));n_val=max(1,int(len(ds)*args.val_fraction))
+    if n_val>=len(ds):raise ValueError('Empty train partition')
+    tr=Subset(ds,order[n_val:].tolist());val=Subset(ds,order[:n_val].tolist())
+    if args.resume and start>=args.epochs:
+        print(f'Already reached epoch {start}; no further training required')
+        return
+    for ep in range(start,args.epochs):
+        train_stats=loop(model,tr,args,provider,source_tasks,device,cache,optimizer)
+        val_stats=loop(model,val,args,provider,source_tasks,device,cache)
+        val_mse=val_stats['overall']['mse']
+        is_best=val_mse is not None and val_mse<best
+        if is_best:best=val_mse
+        save_checkpoint(out/'last.pt',model=model,optimizer=optimizer,cfg=cfg,meta=metadata,epoch=ep+1,best_val=best)
+        if is_best:
+            save_checkpoint(out/'best.pt',model=model,optimizer=optimizer,cfg=cfg,meta=metadata,epoch=ep+1,best_val=best)
+        record={'epoch':ep+1,'train':train_stats,'validation':val_stats,'best_val_mse':best}
+        with (out/'history.jsonl').open('a') as handle:handle.write(json.dumps(record)+'\n')
+        print(json.dumps(record),flush=True)
+    (out/'run_metadata.json').write_text(json.dumps(metadata,indent=2))
+
+def evaluate(args):
+    if not args.checkpoint:raise ValueError('evaluate requires --checkpoint')
+    seed_all(args.seed)
+    # Checkpoint governs architecture, source indicator ordering, and provider.
+    raw=torch.load(args.checkpoint,map_location='cpu',weights_only=False)
+    meta=raw['meta'];original=raw['config']
+    args.provider=meta['provider'];args.model_id=meta['model_id']
+    args.task_dim=original['task_dim'];args.visual_dim=original['visual_dim']
+    args.hidden_dim=original['hidden_dim'];args.experts=original['n_experts'];args.top_k=original['top_k']
+    source_tasks=tuple(meta['source_tasks'])
+    cfg,provider,model,device,cache=make_components(args,source_tasks)
+    load_checkpoint(args.checkpoint,model=model,device=device)
+    names={'SCUI':args.scui_csv,'UCSI':args.ucsi_csv,'UCUI':args.ucui_csv}
+    datasets={key:data_from_path(value,args,'eval') for key,value in names.items() if value}
+    if not datasets:raise ValueError('Provide at least one test split CSV')
+    # Compare metadata of seen-city/source-task training with test partitions.
+    if args.train_csv:
+        train_df=data_from_path(args.train_csv,args,'train').df
+        check_splits(train_df,{name:ds.df for name,ds in datasets.items()})
+    results={name:loop(model,ds,args,provider,source_tasks,device,cache) for name,ds in datasets.items()}
+    out=Path(args.output);out.mkdir(parents=True,exist_ok=True)
+    (out/'metrics.json').write_text(json.dumps(results,indent=2))
+    for name,result in results.items():print(name,result['overall'],flush=True)
+    return results
