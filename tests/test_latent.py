@@ -18,6 +18,16 @@ class TestLatentMode(unittest.TestCase):
         result=batch_latent_knowledge(batch, FakeLatentProvider(), ('POP','EDU'), torch.device('cpu'))
         self.assertEqual(tuple(result.shape),(2,16))
         self.assertFalse(torch.allclose(result[0],result[1]))
+    def test_shared_train_eval_dispatch(self):
+        from urban_transfer.engine import resolve_batch_knowledge
+        from urban_transfer.knowledge import MockProvider
+        batch={'city':['A','B'],'image_path':['one.png','two.png'],
+               'task_description':['short','longer description']}
+        latent=resolve_batch_knowledge(batch,FakeLatentProvider(),('POP','EDU'),torch.device('cpu'),'qwen3vl-latent')
+        self.assertEqual(tuple(latent.shape),(2,16))
+        explicit=resolve_batch_knowledge(batch,MockProvider(),('POP','EDU'),torch.device('cpu'),'mock')
+        self.assertEqual(tuple(explicit.shape),(2,6))
+
     def test_projection_trains(self):
         cfg=ModelConfig(visual_dim=8, task_dim=6, hidden_dim=16, n_experts=4, top_k=2, n_sources=2)
         m=Predictor(cfg,latent_dim=16)
