@@ -20,7 +20,7 @@ def seed_all(seed):
 def data_from_path(path,args,partition):
     return ImageUrbanDataset(path,args.image_root,partition=partition,limit=args.limit,
         task_dim=args.task_dim,require_images=not args.allow_missing_images,
-        image_column=args.image_column)
+        image_column=args.image_column,seed=args.seed)
 
 def source_info(df):
     tasks=tuple(sorted(set(df.indicator_column)))
