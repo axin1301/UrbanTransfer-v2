@@ -71,9 +71,9 @@ class FrozenRemoteCLIP:
 
 class CachedFeatureDataset(Dataset):
     """Do not decode PNG during MoE training/evaluation."""
-    def __init__(self,csv_path,image_root,store,*,partition='eval',limit=None,task_dim=128,image_column=None):
+    def __init__(self,csv_path,image_root,store,*,partition='eval',limit=None,task_dim=128,image_column=None,seed=42):
         self.base=ImageUrbanDataset(csv_path,image_root,partition=partition,limit=limit,
-                                    task_dim=task_dim,image_column=image_column)
+                                    task_dim=task_dim,image_column=image_column,seed=seed)
         self.df=self.base.df
         self.store=store
         self.paths=[str(self.base.find_image(row)) for row in self.df.itertuples(index=False)]
