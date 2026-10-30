@@ -32,7 +32,7 @@ def store_for(args):
 
 def dataset(args,path,store,partition='eval'):
     return CachedFeatureDataset(path,args.image_root,store,partition=partition,
-        limit=args.limit,task_dim=args.task_dim,image_column=args.image_column)
+        limit=args.limit,task_dim=args.task_dim,image_column=args.image_column,seed=args.seed)
 
 def components(args,source_tasks,feature_dim):
     cfg=ModelConfig(use_knowledge=(args.provider!='no-llm'),
@@ -51,6 +51,7 @@ def train(args):
     seed_all(args.seed)
     store=store_for(args)
     ds=dataset(args,args.train_csv,store,'train')
+    print(f'[train] sampled rows={len(ds)} cities={ds.df.city.nunique()} tasks={ds.df.indicator_column.nunique()}',flush=True)
     source_tasks=source_info(ds.df)
     feature_dim=store.get(ds.paths[0]).numel()
     cfg,provider,model,device,cache=components(args,source_tasks,feature_dim)

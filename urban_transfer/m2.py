@@ -20,7 +20,7 @@ def seed_all(seed):
 def data_from_path(path,args,partition):
     return ImageUrbanDataset(path,args.image_root,partition=partition,limit=args.limit,
         task_dim=args.task_dim,require_images=not args.allow_missing_images,
-        image_column=args.image_column)
+        image_column=args.image_column,seed=args.seed)
 
 def source_info(df):
     tasks=tuple(sorted(set(df.indicator_column)))
@@ -114,6 +114,7 @@ def get_meta(args,source_tasks):
 def train(args):
     seed_all(args.seed)
     ds=data_from_path(args.train_csv,args,'train')
+    print(f'[train] sampled rows={len(ds)} cities={ds.df.city.nunique()} tasks={ds.df.indicator_column.nunique()}',flush=True)
     source_tasks=source_info(ds.df)
     cfg,provider,model,device,cache=make_components(args,source_tasks)
     optimizer=torch.optim.AdamW(model.parameters(),lr=args.lr,weight_decay=1e-4)
