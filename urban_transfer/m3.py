@@ -10,6 +10,7 @@ from .model import ModelConfig,TransferModel
 from .engine import build_provider
 from .cache import HiddenStateCache
 from .checkpoints import save_checkpoint,load_checkpoint
+from .formatting import epoch_text,metric_text
 from .m3_features import FeatureStore,CachedFeatureDataset,precompute
 
 class M3Predictor(nn.Module):
@@ -87,7 +88,7 @@ def train(args):
         if improved:save_checkpoint(out/'best.pt',model=model,optimizer=opt,cfg=cfg,meta=meta,epoch=epoch+1,best_val=best)
         record={'epoch':epoch+1,'train':training,'validation':validation,'best_val_mse':best}
         with (out/'history.jsonl').open('a') as f:f.write(json.dumps(record)+'\n')
-        print(json.dumps(record),flush=True)
+        print(epoch_text(record),flush=True)
         if args.patience>0 and epoch+1-best_epoch>=args.patience:break
 
 def evaluate(args):
@@ -118,7 +119,7 @@ def evaluate(args):
         results[name]=loop(model,d,args,provider,source_tasks,device,cache,split_name=name)
         out=Path(args.output);out.mkdir(parents=True,exist_ok=True)
         (out/'metrics.json').write_text(json.dumps(results,indent=2))
-        print(name,results[name]['overall'],flush=True)
+        print(f'{name} {metric_text(results[name][\'overall\'])}',flush=True)
     return results
 
 def extract(args):
