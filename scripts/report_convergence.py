@@ -15,7 +15,7 @@ for directory in a.runs:
     if not valid:
         print(f'{directory}: no validation metrics');continue
     best=min(valid,key=lambda r:r['validation']['overall']['mse'])
-    print(f'\n{directory}: {len(history)} epochs logged; best epoch={best["epoch"]}, val MSE={best["validation"]["overall"]["mse"]:.5f}')
+    print(f'\n{directory}: {len(history)} epochs logged; best epoch={best["epoch"]}, val MSE={best["validation"]["overall"]["mse"]:.3f}')
     print(f'{"epoch":>6} {"train MSE":>13} {"val MSE":>13}')
     for r in history:
         tr=r['train']['mean_mse'];val=r['validation']['overall']['mse']
