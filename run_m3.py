@@ -1,7 +1,9 @@
 """M3 independent entrypoint: precompute | train | evaluate."""
 import argparse
+from urban_transfer.data_paths import add_data_dir_argument, resolve_data_paths
 from urban_transfer.m3 import extract,train,evaluate
 p=argparse.ArgumentParser()
+add_data_dir_argument(p)
 p.add_argument('command',choices=['precompute','train','evaluate'])
 for k in ('train','scui','ucsi','ucui'):
     p.add_argument('--'+k+'-csv')
@@ -31,7 +33,7 @@ p.add_argument('--visual-dim',type=int,default=768)
 p.add_argument('--hidden-dim',type=int,default=128)
 p.add_argument('--experts',type=int,default=6)
 p.add_argument('--top-k',type=int,default=2)
-args=p.parse_args()
+args=resolve_data_paths(p.parse_args())
 if args.command=='precompute':extract(args)
 elif args.command=='train':
     if not args.train_csv:p.error('--train-csv required for training')

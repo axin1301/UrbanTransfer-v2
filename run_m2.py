@@ -1,7 +1,9 @@
 """M2.1 train and evaluation, with independent checkpoint/evaluation commands."""
 import argparse
+from urban_transfer.data_paths import add_data_dir_argument, resolve_data_paths
 from urban_transfer.m2 import train,evaluate
 p=argparse.ArgumentParser()
+add_data_dir_argument(p)
 p.add_argument('command',choices=['train','evaluate'])
 p.add_argument('--train-csv')
 p.add_argument('--scui-csv');p.add_argument('--ucsi-csv');p.add_argument('--ucui-csv')
@@ -22,7 +24,7 @@ p.add_argument('--task-dim',type=int,default=128);p.add_argument('--visual-dim',
 p.add_argument('--hidden-dim',type=int,default=128);p.add_argument('--experts',type=int,default=6)
 p.add_argument('--top-k',type=int,default=2)
 p.add_argument('--allow-missing-images',action='store_true',help='Mock smoke tests only')
-args=p.parse_args()
+args=resolve_data_paths(p.parse_args())
 if args.command=='train':
     if not args.train_csv:p.error('--train-csv is required for training')
     train(args)
