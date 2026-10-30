@@ -196,5 +196,5 @@ def evaluate(args):
     results={name:loop(model,ds,args,provider,source_tasks,device,cache,split_name=name) for name,ds in datasets.items()}
     out=Path(args.output);out.mkdir(parents=True,exist_ok=True)
     (out/'metrics.json').write_text(json.dumps(results,indent=2))
-    for name,result in results.items():print(f'{name} {metric_text(result[\'overall\'])}',flush=True)
+    for name,result in results.items():print(name, metric_text(result['overall']), flush=True)
     return results

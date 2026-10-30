@@ -119,7 +119,7 @@ def evaluate(args):
         results[name]=loop(model,d,args,provider,source_tasks,device,cache,split_name=name)
         out=Path(args.output);out.mkdir(parents=True,exist_ok=True)
         (out/'metrics.json').write_text(json.dumps(results,indent=2))
-        print(f'{name} {metric_text(results[name][\'overall\'])}',flush=True)
+        print(name, metric_text(results[name]['overall']), flush=True)
     return results
 
 def extract(args):
