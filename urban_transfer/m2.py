@@ -47,9 +47,9 @@ def obtain_knowledge(batch,args,provider,source_tasks,device,cache):
         batch['city']=batch['knowledge_city']
         batch['task_description']=batch['knowledge_task_description']
     if args.provider in ('qwen3vl-latent','shuffled-latent') and cache.enabled:
-        result=[cache.get_or_compute(provider=provider,image_path=path,city=city,task_description=description,
-                    source_tasks=source_tasks)
-                for city,path,description in zip(batch['city'],batch['image_path'],batch['task_description'])]
+        result=cache.get_or_compute_many(provider=provider,
+                requests=[dict(image_path=path,city=city,task_description=description,source_tasks=source_tasks)
+                          for city,path,description in zip(batch['city'],batch['image_path'],batch['task_description'])])
         return torch.stack(result).to(device,dtype=torch.float32)
     return resolve_batch_knowledge(batch,provider,source_tasks,device,
                                    'qwen3vl-latent' if args.provider=='shuffled-latent' else args.provider)
@@ -59,7 +59,11 @@ def loop(model,ds,args,provider,source_tasks,device,cache,optimizer=None,split_n
     model.train(train)
     if args.provider=='shuffled-latent':
         ds=PermutedKnowledgeDataset(ds,seed=args.seed+({'train':0,'validation':1}.get(split_name,2)))
-    loader=DataLoader(ds,batch_size=args.batch_size,shuffle=train,num_workers=0)
+    eval_batch_size=getattr(args,'eval_batch_size',64)
+    if eval_batch_size<1:raise ValueError('--eval-batch-size must be positive')
+    workers=getattr(args,'eval_workers',0) if not train else 0
+    loader=DataLoader(ds,batch_size=args.batch_size if train else eval_batch_size,
+                      shuffle=train,num_workers=workers,pin_memory=(device.type=='cuda'))
     truth=[];prediction=[];groups={};loss_sum=0.
     done=0
     if split_name:
@@ -74,7 +78,7 @@ def loop(model,ds,args,provider,source_tasks,device,cache,optimizer=None,split_n
                 optimizer.zero_grad();loss.backward();optimizer.step()
         count=len(batch['task_name']);loss_sum+=float(loss.item())*count
         done+=count
-        if split_name and (done % max(args.batch_size*10,1) < count or done==len(ds)):
+        if split_name and (done % max((args.batch_size if train else eval_batch_size)*10,1) < count or done==len(ds)):
             print(f'[eval] {split_name}: {done}/{len(ds)} rows',flush=True)
         if not train:
             for actual,pred,city,task in zip(batch['target'].detach().cpu().tolist(),
