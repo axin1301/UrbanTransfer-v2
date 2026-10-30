@@ -11,6 +11,7 @@ from .model import ModelConfig
 from .cache import HiddenStateCache
 from .ablations import PermutedKnowledgeDataset
 from .checkpoints import save_checkpoint,load_checkpoint
+from .formatting import epoch_text,metric_text
 
 def seed_all(seed):
     random.seed(seed);np.random.seed(seed);torch.manual_seed(seed)
@@ -165,7 +166,7 @@ def train(args):
             save_checkpoint(out/'best.pt',model=model,optimizer=optimizer,cfg=cfg,meta=metadata,epoch=ep+1,best_val=best)
         record={'epoch':ep+1,'train':train_stats,'validation':val_stats,'best_val_mse':best}
         with (out/'history.jsonl').open('a') as handle:handle.write(json.dumps(record)+'\n')
-        print(json.dumps(record),flush=True)
+        print(epoch_text(record),flush=True)
         if getattr(args,'patience',0)>0 and (ep+1-best_epoch)>=args.patience:
             print(f'[early-stop] validation MSE has not improved for {args.patience} epochs; best epoch={best_epoch}',flush=True)
             break
@@ -195,5 +196,5 @@ def evaluate(args):
     results={name:loop(model,ds,args,provider,source_tasks,device,cache,split_name=name) for name,ds in datasets.items()}
     out=Path(args.output);out.mkdir(parents=True,exist_ok=True)
     (out/'metrics.json').write_text(json.dumps(results,indent=2))
-    for name,result in results.items():print(name,result['overall'],flush=True)
+    for name,result in results.items():print(f'{name} {metric_text(result[\'overall\'])}',flush=True)
     return results
