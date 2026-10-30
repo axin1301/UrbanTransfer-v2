@@ -80,6 +80,40 @@ class HiddenStateCache:
             ) from exc
         return value
 
+    def get_or_compute_many(self, *, provider, requests):
+        """Fetch an evaluation batch in one SQLite read; encode only misses.
+
+        Return order matches requests. Missing Qwen inputs still use individual
+        multimodal forwards, preserving the exact existing representation.
+        """
+        requests=list(requests)
+        if not requests:
+            return []
+        if not self.enabled:
+            return [provider.infer_hidden(**request) for request in requests]
+        keys=[self._key(**request) for request in requests]
+        unique_keys=list(dict.fromkeys(keys))
+        found={}
+        # Chunk SQLite IN queries to stay below legacy variable limits.
+        try:
+            with self._connect() as db:
+                for start in range(0,len(unique_keys),500):
+                    chunk=unique_keys[start:start+500]
+                    sql='SELECT cache_key,dim,data FROM vectors WHERE cache_key IN ('+','.join('?' for _ in chunk)+')'
+                    for key,dim,raw in db.execute(sql,chunk):
+                        if dim>0 and len(raw)==dim*4:
+                            a=np.frombuffer(raw,dtype='<f4').copy()
+                            if np.isfinite(a).all():
+                                found[key]=torch.from_numpy(a)
+        except sqlite3.Error as exc:
+            raise RuntimeError(f'Qwen SQLite batch cache read failed at {self.db_path}: {exc}') from exc
+        unique_requests=dict(zip(keys,requests))
+        for key in unique_keys:
+            if key not in found:
+                # get_or_compute manages write-through and validation.
+                found[key]=self.get_or_compute(provider=provider,**unique_requests[key])
+        return [found[key] for key in keys]
+
     def __len__(self):
         if not self.enabled:return 0
         with self._connect() as db:
