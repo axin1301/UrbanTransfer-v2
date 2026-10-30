@@ -37,6 +37,22 @@ class SQLiteCacheTests(unittest.TestCase):
             again.get_or_compute(provider=p,**kw)
             self.assertEqual(p.calls,2)
 
+    def test_batch_reuses_cache_and_deduplicates_keys(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            image=root/'tile.png';image.write_bytes(b'fake')
+            cache=HiddenStateCache(root/'cache','qwen-test')
+            p=FakeProvider()
+            req=dict(image_path=str(image),city='A',task_description='task',source_tasks=('x',))
+            other=dict(req,task_description='another')
+            result=cache.get_or_compute_many(provider=p,requests=[req,req,other])
+            self.assertEqual(p.calls,2)
+            self.assertEqual(len(result),3)
+            self.assertTrue(torch.equal(result[0],result[1]))
+            again=cache.get_or_compute_many(provider=p,requests=[other,req])
+            self.assertEqual(p.calls,2)
+            self.assertEqual(len(again),2)
+
     def test_cache_disabled(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);image=root/'tile.png';image.write_bytes(b'fake')

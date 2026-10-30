@@ -13,6 +13,8 @@ p.add_argument('--output',default='runs/m2');p.add_argument('--cache-dir',defaul
 p.add_argument('--no-cache',action='store_true')
 p.add_argument('--checkpoint');p.add_argument('--resume')
 p.add_argument('--epochs',type=int,default=3);p.add_argument('--batch-size',type=int,default=2)
+p.add_argument('--eval-batch-size',type=int,default=64,help='Evaluation batch size; independent of training batch size')
+p.add_argument('--eval-workers',type=int,default=0,help='DataLoader image-reading workers for evaluation')
 p.add_argument('--limit',type=int);p.add_argument('--seed',type=int,default=42)
 p.add_argument('--lr',type=float,default=1e-4);p.add_argument('--val-fraction',type=float,default=0.1)
 p.add_argument('--patience',type=int,default=0,help='Early-stop after N epochs without validation improvement; 0 disables')
