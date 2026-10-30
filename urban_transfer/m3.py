@@ -32,7 +32,7 @@ def store_for(args):
 
 def dataset(args,path,store,partition='eval'):
     return CachedFeatureDataset(path,args.image_root,store,partition=partition,
-        limit=args.limit,task_dim=args.task_dim,image_column=args.image_column)
+        limit=args.limit,task_dim=args.task_dim,image_column=args.image_column,seed=args.seed)
 
 def components(args,source_tasks,feature_dim):
     cfg=ModelConfig(use_knowledge=(args.provider!='no-llm'),
