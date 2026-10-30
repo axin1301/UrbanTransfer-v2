@@ -114,7 +114,7 @@ def train(args):
     optimizer=torch.optim.AdamW(model.parameters(),lr=args.lr,weight_decay=1e-4)
     out=Path(args.output);out.mkdir(parents=True,exist_ok=True)
     metadata=get_meta(args,source_tasks)
-    start=0;best=float('inf')
+    start=0;best=float('inf');best_epoch=0
     if args.resume:
         ckpt=load_checkpoint(args.resume,model=model,optimizer=optimizer,restore_rng=True,device=device)
         if ckpt['meta']['source_tasks'] != list(source_tasks):
@@ -125,6 +125,7 @@ def train(args):
             if ckpt['meta'].get(key) != metadata.get(key):
                 raise ValueError(f'Cannot resume: {key} changed')
         start=int(ckpt['epoch']);best=ckpt.get('best_val') if ckpt.get('best_val') is not None else float('inf')
+        best_epoch=int(ckpt['meta'].get('best_epoch',start))
     # Validation is a held-out subset of seen-city/source-task training data.
     # It is NOT any of the SCUI/UCSI/UCUI test splits.
     if not 0<args.val_fraction<0.5:raise ValueError('--val-fraction must be (0, 0.5)')
@@ -151,13 +152,19 @@ def train(args):
         val_stats=loop(model,val,args,provider,source_tasks,device,cache,split_name='validation')
         val_mse=val_stats['overall']['mse']
         is_best=val_mse is not None and val_mse<best
-        if is_best:best=val_mse
+        if is_best:
+            best=val_mse
+            best_epoch=ep+1
+        metadata['best_epoch']=best_epoch
         save_checkpoint(out/'last.pt',model=model,optimizer=optimizer,cfg=cfg,meta=metadata,epoch=ep+1,best_val=best)
         if is_best:
             save_checkpoint(out/'best.pt',model=model,optimizer=optimizer,cfg=cfg,meta=metadata,epoch=ep+1,best_val=best)
         record={'epoch':ep+1,'train':train_stats,'validation':val_stats,'best_val_mse':best}
         with (out/'history.jsonl').open('a') as handle:handle.write(json.dumps(record)+'\n')
         print(json.dumps(record),flush=True)
+        if getattr(args,'patience',0)>0 and (ep+1-best_epoch)>=args.patience:
+            print(f'[early-stop] validation MSE has not improved for {args.patience} epochs; best epoch={best_epoch}',flush=True)
+            break
     (out/'run_metadata.json').write_text(json.dumps(metadata,indent=2))
 
 def evaluate(args):
