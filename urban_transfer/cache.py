@@ -38,6 +38,20 @@ class HiddenStateCache:
             raise ValueError('MLLM latent vector must be finite 1D Tensor')
         value=value.detach().float().cpu()
         tmp=path.with_name(path.name+'.'+str(os.getpid())+'.tmp')
-        torch.save(value,tmp)
-        os.replace(tmp,path)
+        try:
+            torch.save(value,tmp)
+            os.replace(tmp,path)
+        except (OSError, RuntimeError) as exc:
+            # Do not hide quota/permission/storage failures; otherwise a large
+            # evaluation can silently rerun Qwen on every subsequent pass.
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise RuntimeError(
+                f"Failed to write Qwen cache entry at {path}: {exc}. "
+                "Check df -h, df -i, filesystem quota and directory write permissions. "
+                "Alternatively pass --cache-dir /path/with/space, or --no-cache "
+                "(slower; Qwen reruns for every example)."
+            ) from exc
         return value
