@@ -51,6 +51,7 @@ def train(args):
     seed_all(args.seed)
     store=store_for(args)
     ds=dataset(args,args.train_csv,store,'train')
+    print(f'[train] sampled rows={len(ds)} cities={ds.df.city.nunique()} tasks={ds.df.indicator_column.nunique()}',flush=True)
     source_tasks=source_info(ds.df)
     feature_dim=store.get(ds.paths[0]).numel()
     cfg,provider,model,device,cache=components(args,source_tasks,feature_dim)
