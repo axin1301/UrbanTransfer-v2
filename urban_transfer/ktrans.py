@@ -13,6 +13,7 @@ from .protocol import TASK_DESCRIPTIONS
 from .m3_features import FeatureStore, CachedFeatureDataset, FrozenRemoteCLIP
 from .m3 import M3Predictor
 from .ktrans_scale import TaskScalePredictor
+from .ktrans_experts import SemanticExpertBank
 from .model import ModelConfig
 from .m2 import loop, seed_all
 from .cache import HiddenStateCache
@@ -86,10 +87,16 @@ def dataset(args,task_vectors):
          limit=args.limit,task_dim=dim,image_column=args.image_column,seed=args.seed)
     return SemanticDataset(ds,task_vectors)
 
-def make_model(args,input_dim,task_dim,n_sources):
+def make_model(args,input_dim,task_dim,n_sources,task_vectors=None,source_tasks=None):
     cfg=ModelConfig(visual_dim=args.visual_dim,task_dim=task_dim,hidden_dim=args.hidden_dim,
         n_experts=args.experts,top_k=args.top_k,n_sources=n_sources,use_knowledge=False)
     device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    if getattr(args,'expert_bank',False):
+        if task_vectors is None or source_tasks is None:
+            raise ValueError('Expert bank needs task vectors and source tasks')
+        model=SemanticExpertBank(input_dim,task_vectors,source_tasks,
+              hidden_dim=args.hidden_dim,temperature=args.router_temperature)
+        return cfg,model.to(device),device
     model=(TaskScalePredictor(cfg,input_dim,task_dim) if getattr(args,'scale_head',False)
            else M3Predictor(cfg,input_dim))
     return cfg,model.to(device),device
@@ -108,8 +115,9 @@ def run(args):
           f'heldout_task={args.heldout_task} heldout_cities={len(unseen_cities)}',flush=True)
     print('[k0] '+ ' '.join(f'{name}={len(ids)}' for name,ids in split.items()),flush=True)
     in_dim=ds[0]['image'].numel()
+    source_tasks=tuple(sorted(set(ds.df.iloc[split['train']].indicator_column)))
     cfg,model,device=make_model(args,in_dim,len(next(iter(task_vectors.values()))),
-                len(set(ds.df.indicator_column))-1)
+                len(source_tasks),task_vectors,source_tasks)
     optimizer=torch.optim.AdamW(model.parameters(),lr=args.lr,weight_decay=1e-4)
     # No provider or Qwen; this mode only tests frozen visual/text embeddings.
     cache=HiddenStateCache(args.cache_dir,'unused',enabled=False)
@@ -119,7 +127,10 @@ def run(args):
           'heldout_cities':unseen_cities,'seed':args.seed,'limit':args.limit,
           'feature_dir':args.feature_dir,'remoteclip_model':args.remoteclip_model,
           'train_csv':str(Path(args.train_csv).resolve()),'meta_city_fraction':args.meta_city_fraction,
-          'scale_head':getattr(args,'scale_head',False)}
+          'scale_head':getattr(args,'scale_head',False),
+          'expert_bank':getattr(args,'expert_bank',False),
+          'router_temperature':getattr(args,'router_temperature',0.15),
+          'source_tasks':list(source_tasks)}
     best=float('inf');best_epoch=0
     for epoch in range(1,args.epochs+1):
         tr=loop(model,subsets['train'],args,None,(),device,cache,optimizer=optimizer)
@@ -134,7 +145,7 @@ def run(args):
             save_checkpoint(out/'best.pt',model=model,optimizer=optimizer,cfg=cfg,meta=meta,epoch=epoch,best_val=best)
         record={'epoch':epoch,'train':tr,'meta_validation':vals,'best_meta_mse':best}
         with (out/'history.jsonl').open('a') as f:f.write(json.dumps(record)+'\n')
-        print(f'[k1] epoch={epoch} train_mse={tr["mean_mse"]:.3f} '
+        print(f'[ktrans] epoch={epoch} train_mse={tr["mean_mse"]:.3f} '
               + ' '.join(f'{name}={vals[name]["overall"]["mse"]:.3f}' for name in vals)
               +f' best_meta={best:.3f}',flush=True)
         if args.patience>0 and epoch-best_epoch>=args.patience:break
@@ -148,6 +159,10 @@ def evaluate_meta(args):
     if meta.get('pipeline')!='ktrans-k0-k1':raise ValueError('Not K0/K1 checkpoint')
     for key in ('task_encoder','heldout_task','remoteclip_model','limit','seed','meta_city_fraction','scale_head'):
         if getattr(args,key)!=meta[key]:raise ValueError(f'Checkpoint config mismatch: {key}')
+    if getattr(args,'expert_bank',False)!=meta.get('expert_bank',False):
+        raise ValueError('Checkpoint expert-bank mode mismatch')
+    if getattr(args,'expert_bank',False) and args.router_temperature!=meta['router_temperature']:
+        raise ValueError('Checkpoint router temperature mismatch')
     vectors=task_embeddings(args) if args.task_encoder=='remoteclip' else {
         task:torch.from_numpy(task_vector(desc,128).copy()) for task,desc in TASK_DESCRIPTIONS.items()}
     ds=dataset(args,vectors)
@@ -156,7 +171,8 @@ def evaluate_meta(args):
     config=raw['config']
     args.task_dim=config['task_dim'];args.visual_dim=config['visual_dim']
     args.hidden_dim=config['hidden_dim'];args.experts=config['n_experts'];args.top_k=config['top_k']
-    cfg,model,device=make_model(args,ds[0]['image'].numel(),len(next(iter(vectors.values()))),config['n_sources'])
+    cfg,model,device=make_model(args,ds[0]['image'].numel(),len(next(iter(vectors.values()))),
+                                 config['n_sources'],vectors,meta.get('source_tasks'))
     load_checkpoint(args.checkpoint,model=model,device=device)
     cache=HiddenStateCache(args.cache_dir,'unused',enabled=False)
     results={}
