@@ -97,6 +97,10 @@ def evaluate_checkpoint(path,cli):
                                vectors,meta.get('source_tasks'))
     load_checkpoint(path,model=model,device=device)
     model.eval()
+    if cli.routing_mode!='semantic':
+        if not args.expert_bank:
+            raise ValueError('--routing-mode uniform/random requires a K2-B1 expert-bank checkpoint')
+        model.set_routing_mode(cli.routing_mode,seed=cli.routing_seed)
     results={}
     predictions=[]
     for name in ('meta_SCUI','meta_UCSI','meta_UCUI'):
@@ -126,6 +130,8 @@ def evaluate_checkpoint(path,cli):
         'heldout_task':meta['heldout_task'],
         'task_encoder':meta['task_encoder'],
         'scale_head':args.scale_head,
+        'routing_mode':cli.routing_mode,
+        'routing_seed':cli.routing_seed,
         'metrics':results,
     },predictions
 
@@ -143,13 +149,16 @@ def main():
     parser.add_argument('--batch-size',type=int,default=256)
     parser.add_argument('--output',default='runs/ktrans_diagnostics')
     parser.add_argument('--save-predictions',action='store_true')
+    parser.add_argument('--routing-mode',choices=['semantic','uniform','random'],default='semantic',
+                        help='K2-B1 evaluation-only source expert route override')
+    parser.add_argument('--routing-seed',type=int,default=42)
     args=parser.parse_args()
     if args.batch_size<1:parser.error('--batch-size must be positive')
     out=Path(args.output);out.mkdir(parents=True,exist_ok=True)
     all_results=[]
     for n,path in enumerate(args.checkpoint):
         result,rows=evaluate_checkpoint(path,args)
-        result['label']=Path(path).parent.name
+        result['label']=Path(path).parent.name+('_'+args.routing_mode if args.routing_mode!='semantic' else '')
         all_results.append(result)
         if args.save_predictions:
             name=f'predictions_{n}_{Path(path).parent.name}.csv'
