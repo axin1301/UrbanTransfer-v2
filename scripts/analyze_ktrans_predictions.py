@@ -4,9 +4,13 @@ Per-partition true/predicted distribution, bias, Pearson, R2, baseline MSE.
 Never uses external test splits or labels for calibration.
 """
 import argparse
+import sys
 import csv
 import json
 from pathlib import Path
+
+# Support direct execution: python scripts/analyze_ktrans_predictions.py
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from types import SimpleNamespace
 
 import numpy as np
