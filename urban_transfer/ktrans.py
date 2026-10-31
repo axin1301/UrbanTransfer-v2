@@ -14,6 +14,7 @@ from .m3_features import FeatureStore, CachedFeatureDataset, FrozenRemoteCLIP
 from .m3 import M3Predictor
 from .ktrans_scale import TaskScalePredictor
 from .ktrans_experts import SemanticExpertBank
+from .ktrans_normalized import NormalizedExpertBank,source_moments
 from .model import ModelConfig
 from .m2 import loop, seed_all
 from .cache import HiddenStateCache
@@ -87,15 +88,20 @@ def dataset(args,task_vectors):
          limit=args.limit,task_dim=dim,image_column=args.image_column,seed=args.seed)
     return SemanticDataset(ds,task_vectors)
 
-def make_model(args,input_dim,task_dim,n_sources,task_vectors=None,source_tasks=None):
+def make_model(args,input_dim,task_dim,n_sources,task_vectors=None,source_tasks=None,source_stats=None):
     cfg=ModelConfig(visual_dim=args.visual_dim,task_dim=task_dim,hidden_dim=args.hidden_dim,
         n_experts=args.experts,top_k=args.top_k,n_sources=n_sources,use_knowledge=False)
     device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     if getattr(args,'expert_bank',False):
         if task_vectors is None or source_tasks is None:
             raise ValueError('Expert bank needs task vectors and source tasks')
-        model=SemanticExpertBank(input_dim,task_vectors,source_tasks,
-              hidden_dim=args.hidden_dim,temperature=args.router_temperature)
+        if getattr(args,'normalized_experts',False):
+            if source_stats is None:raise ValueError('Normalized expert bank needs source-only training moments')
+            model=NormalizedExpertBank(input_dim,task_vectors,source_tasks,source_stats,
+                  hidden_dim=args.hidden_dim,temperature=args.router_temperature)
+        else:
+            model=SemanticExpertBank(input_dim,task_vectors,source_tasks,
+                  hidden_dim=args.hidden_dim,temperature=args.router_temperature)
         return cfg,model.to(device),device
     model=(TaskScalePredictor(cfg,input_dim,task_dim) if getattr(args,'scale_head',False)
            else M3Predictor(cfg,input_dim))
@@ -116,8 +122,12 @@ def run(args):
     print('[k0] '+ ' '.join(f'{name}={len(ids)}' for name,ids in split.items()),flush=True)
     in_dim=ds[0]['image'].numel()
     source_tasks=tuple(sorted(set(ds.df.iloc[split['train']].indicator_column)))
+    if getattr(args,'normalized_experts',False) and not getattr(args,'expert_bank',False):
+        raise ValueError('--normalized-experts requires --expert-bank')
+    stats=(source_moments(ds.df.iloc[split['train']],source_tasks)
+           if getattr(args,'normalized_experts',False) else None)
     cfg,model,device=make_model(args,in_dim,len(next(iter(task_vectors.values()))),
-                len(source_tasks),task_vectors,source_tasks)
+                len(source_tasks),task_vectors,source_tasks,stats)
     optimizer=torch.optim.AdamW(model.parameters(),lr=args.lr,weight_decay=1e-4)
     # No provider or Qwen; this mode only tests frozen visual/text embeddings.
     cache=HiddenStateCache(args.cache_dir,'unused',enabled=False)
@@ -130,7 +140,9 @@ def run(args):
           'scale_head':getattr(args,'scale_head',False),
           'expert_bank':getattr(args,'expert_bank',False),
           'router_temperature':getattr(args,'router_temperature',0.15),
-          'source_tasks':list(source_tasks)}
+          'source_tasks':list(source_tasks),
+          'normalized_experts':getattr(args,'normalized_experts',False),
+          'source_stats':stats}
     best=float('inf');best_epoch=0
     for epoch in range(1,args.epochs+1):
         tr=loop(model,subsets['train'],args,None,(),device,cache,optimizer=optimizer)
@@ -159,6 +171,8 @@ def evaluate_meta(args):
     if meta.get('pipeline')!='ktrans-k0-k1':raise ValueError('Not K0/K1 checkpoint')
     for key in ('task_encoder','heldout_task','remoteclip_model','limit','seed','meta_city_fraction','scale_head'):
         if getattr(args,key)!=meta[key]:raise ValueError(f'Checkpoint config mismatch: {key}')
+    if getattr(args,'normalized_experts',False)!=meta.get('normalized_experts',False):
+        raise ValueError('Checkpoint normalized-experts mode mismatch')
     if getattr(args,'expert_bank',False)!=meta.get('expert_bank',False):
         raise ValueError('Checkpoint expert-bank mode mismatch')
     if getattr(args,'expert_bank',False) and args.router_temperature!=meta['router_temperature']:
@@ -172,7 +186,7 @@ def evaluate_meta(args):
     args.task_dim=config['task_dim'];args.visual_dim=config['visual_dim']
     args.hidden_dim=config['hidden_dim'];args.experts=config['n_experts'];args.top_k=config['top_k']
     cfg,model,device=make_model(args,ds[0]['image'].numel(),len(next(iter(vectors.values()))),
-                                 config['n_sources'],vectors,meta.get('source_tasks'))
+                                 config['n_sources'],vectors,meta.get('source_tasks'),meta.get('source_stats'))
     load_checkpoint(args.checkpoint,model=model,device=device)
     cache=HiddenStateCache(args.cache_dir,'unused',enabled=False)
     results={}

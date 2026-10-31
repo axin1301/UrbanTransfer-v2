@@ -70,6 +70,7 @@ def evaluate_checkpoint(path,cli):
         image_root=cli.image_root,image_column=cli.image_column,
         scale_head=meta.get('scale_head',False),
         expert_bank=meta.get('expert_bank',False),
+        normalized_experts=meta.get('normalized_experts',False),
         router_temperature=meta.get('router_temperature',0.15),
     )
     cfg=raw['config']
@@ -94,7 +95,7 @@ def evaluate_checkpoint(path,cli):
     if task_dim!=config_task_dim:
         raise ValueError(f'Text embedding dimensionality mismatch: {task_dim} vs {config_task_dim}')
     _,model,device=make_model(args,ds[0]['image'].numel(),task_dim,cfg['n_sources'],
-                               vectors,meta.get('source_tasks'))
+                               vectors,meta.get('source_tasks'),meta.get('source_stats'))
     load_checkpoint(path,model=model,device=device)
     model.eval()
     if cli.routing_mode!='semantic':
