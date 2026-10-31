@@ -69,6 +69,8 @@ def evaluate_checkpoint(path,cli):
         train_csv=cli.train_csv or meta['train_csv'],
         image_root=cli.image_root,image_column=cli.image_column,
         scale_head=meta.get('scale_head',False),
+        expert_bank=meta.get('expert_bank',False),
+        router_temperature=meta.get('router_temperature',0.15),
     )
     cfg=raw['config']
     for key in ('visual_dim','hidden_dim'):
@@ -91,7 +93,8 @@ def evaluate_checkpoint(path,cli):
     task_dim=len(next(iter(vectors.values())))
     if task_dim!=config_task_dim:
         raise ValueError(f'Text embedding dimensionality mismatch: {task_dim} vs {config_task_dim}')
-    _,model,device=make_model(args,ds[0]['image'].numel(),task_dim,cfg['n_sources'])
+    _,model,device=make_model(args,ds[0]['image'].numel(),task_dim,cfg['n_sources'],
+                               vectors,meta.get('source_tasks'))
     load_checkpoint(path,model=model,device=device)
     model.eval()
     results={}
