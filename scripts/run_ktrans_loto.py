@@ -103,6 +103,7 @@ def summarize(root, seeds, output):
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--mode', choices=['all', 'train', 'evaluate', 'summarize'], default='all')
+    p.add_argument('--normalized-experts',action='store_true',help='K3-A: standardized source experts; use fresh runs-root')
     p.add_argument('--limit', type=int, default=5000)
     p.add_argument('--epochs', type=int, default=30)
     p.add_argument('--batch-size', type=int, default=128)
@@ -124,6 +125,7 @@ def main():
                 continue
             run_command([
                 sys.executable, '-u', 'run_ktrans.py', 'train',
+                *(['--normalized-experts'] if args.normalized_experts else []),
                 '--expert-bank', '--task-encoder', 'remoteclip',
                 '--heldout-task', task,
                 '--limit', str(args.limit), '--epochs', str(args.epochs),
