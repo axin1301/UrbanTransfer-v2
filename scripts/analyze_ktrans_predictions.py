@@ -21,6 +21,7 @@ from urban_transfer.data_paths import DEFAULT_SPLIT_DIR
 from urban_transfer.data_m1 import task_vector
 from urban_transfer.protocol import TASK_DESCRIPTIONS
 from urban_transfer.ktrans import task_embeddings, dataset, meta_indices, make_model
+from urban_transfer.ktrans_text import qwen_task_vectors
 from urban_transfer.checkpoints import load_checkpoint
 
 
@@ -72,13 +73,19 @@ def evaluate_checkpoint(path,cli):
         expert_bank=meta.get('expert_bank',False),
         normalized_experts=meta.get('normalized_experts',False),
         router_temperature=meta.get('router_temperature',0.15),
+        text_model_id=meta.get('text_model_id','Qwen/Qwen3-Embedding-0.6B'),
+        task_profile=meta.get('task_profile','short'),
+        llm_profile_file=cli.llm_profile_file,
     )
     cfg=raw['config']
     for key in ('visual_dim','hidden_dim'):
         setattr(args,key,cfg[key])
     args.experts=cfg['n_experts']
     args.top_k=cfg['top_k']
-    if args.task_encoder=='remoteclip':
+    if args.task_encoder=='qwen3':
+        vectors=qwen_task_vectors(root=args.text_cache_dir,model_id=args.text_model_id,
+            profile=args.task_profile,llm_profile_file=args.llm_profile_file,only_cached=True)
+    elif args.task_encoder=='remoteclip':
         vectors=task_embeddings(args)
     else:
         vectors={task:torch.from_numpy(task_vector(desc,128).copy())
@@ -147,6 +154,7 @@ def main():
     parser.add_argument('--feature-dir',default='runs/m3_features')
     parser.add_argument('--text-cache-dir',default='runs/ktrans_text_cache')
     parser.add_argument('--remoteclip-checkpoint')
+    parser.add_argument('--llm-profile-file')
     parser.add_argument('--batch-size',type=int,default=256)
     parser.add_argument('--output',default='runs/ktrans_diagnostics')
     parser.add_argument('--save-predictions',action='store_true')

@@ -15,6 +15,7 @@ from .m3 import M3Predictor
 from .ktrans_scale import TaskScalePredictor
 from .ktrans_experts import SemanticExpertBank
 from .ktrans_normalized import NormalizedExpertBank,source_moments
+from .ktrans_text import qwen_task_vectors
 from .model import ModelConfig
 from .m2 import loop, seed_all
 from .cache import HiddenStateCache
@@ -109,7 +110,10 @@ def make_model(args,input_dim,task_dim,n_sources,task_vectors=None,source_tasks=
 
 def run(args):
     seed_all(args.seed)
-    if args.task_encoder=='remoteclip':
+    if args.task_encoder=='qwen3':
+        task_vectors=qwen_task_vectors(root=args.text_cache_dir,model_id=args.text_model_id,
+            profile=args.task_profile,llm_profile_file=args.llm_profile_file,only_cached=True)
+    elif args.task_encoder=='remoteclip':
         task_vectors=task_embeddings(args)
     else:
         task_vectors={task:torch.from_numpy(task_vector(desc,128).copy())
@@ -142,7 +146,10 @@ def run(args):
           'router_temperature':getattr(args,'router_temperature',0.15),
           'source_tasks':list(source_tasks),
           'normalized_experts':getattr(args,'normalized_experts',False),
-          'source_stats':stats}
+          'source_stats':stats,
+          'text_model_id':getattr(args,'text_model_id',None),
+          'task_profile':getattr(args,'task_profile','short'),
+          'llm_profile_file':getattr(args,'llm_profile_file',None)}
     best=float('inf');best_epoch=0
     for epoch in range(1,args.epochs+1):
         tr=loop(model,subsets['train'],args,None,(),device,cache,optimizer=optimizer)
@@ -177,8 +184,16 @@ def evaluate_meta(args):
         raise ValueError('Checkpoint expert-bank mode mismatch')
     if getattr(args,'expert_bank',False) and args.router_temperature!=meta['router_temperature']:
         raise ValueError('Checkpoint router temperature mismatch')
-    vectors=task_embeddings(args) if args.task_encoder=='remoteclip' else {
-        task:torch.from_numpy(task_vector(desc,128).copy()) for task,desc in TASK_DESCRIPTIONS.items()}
+    if args.task_encoder=='qwen3':
+        if args.text_model_id!=meta['text_model_id'] or args.task_profile!=meta['task_profile']:
+            raise ValueError('Qwen encoder/profile differs from checkpoint')
+        vectors=qwen_task_vectors(root=args.text_cache_dir,model_id=args.text_model_id,
+            profile=args.task_profile,llm_profile_file=args.llm_profile_file,only_cached=True)
+    elif args.task_encoder=='remoteclip':
+        vectors=task_embeddings(args)
+    else:
+        vectors={
+            task:torch.from_numpy(task_vector(desc,128).copy()) for task,desc in TASK_DESCRIPTIONS.items()}
     ds=dataset(args,vectors)
     split,cities=meta_indices(ds.df,args.heldout_task,args.meta_city_fraction,args.seed)
     if cities!=meta['heldout_cities']:raise ValueError('Meta city split mismatch')

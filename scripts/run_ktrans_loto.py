@@ -103,6 +103,10 @@ def summarize(root, seeds, output):
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--mode', choices=['all', 'train', 'evaluate', 'summarize'], default='all')
+    p.add_argument('--task-encoder',choices=['remoteclip','qwen3'],default='remoteclip')
+    p.add_argument('--task-profile',choices=['short','structured','llm'],default='short')
+    p.add_argument('--text-model-id',default='Qwen/Qwen3-Embedding-0.6B')
+    p.add_argument('--llm-profile-file')
     p.add_argument('--normalized-experts',action='store_true',help='K3-A: standardized source experts; use fresh runs-root')
     p.add_argument('--limit', type=int, default=5000)
     p.add_argument('--epochs', type=int, default=30)
@@ -126,7 +130,9 @@ def main():
             run_command([
                 sys.executable, '-u', 'run_ktrans.py', 'train',
                 *(['--normalized-experts'] if args.normalized_experts else []),
-                '--expert-bank', '--task-encoder', 'remoteclip',
+                '--expert-bank', '--task-encoder', args.task_encoder,
+                '--task-profile', args.task_profile, '--text-model-id', args.text_model_id,
+                *(['--llm-profile-file', args.llm_profile_file] if args.llm_profile_file else []),
                 '--heldout-task', task,
                 '--limit', str(args.limit), '--epochs', str(args.epochs),
                 '--patience', '0', '--seed', str(args.seed),
@@ -152,6 +158,7 @@ def main():
                 run_command([
                     sys.executable, '-u', 'scripts/analyze_ktrans_predictions.py',
                     '--checkpoint', str(ckpt),
+                    *(['--llm-profile-file', args.llm_profile_file] if args.llm_profile_file else []),
                     '--routing-mode', route, '--routing-seed', str(seed),
                     '--feature-dir', args.feature_dir,
                     '--text-cache-dir', args.text_cache_dir,
