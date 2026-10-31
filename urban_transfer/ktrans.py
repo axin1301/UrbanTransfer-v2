@@ -12,6 +12,7 @@ from .data_m1 import task_vector
 from .protocol import TASK_DESCRIPTIONS
 from .m3_features import FeatureStore, CachedFeatureDataset, FrozenRemoteCLIP
 from .m3 import M3Predictor
+from .ktrans_scale import TaskScalePredictor
 from .model import ModelConfig
 from .m2 import loop, seed_all
 from .cache import HiddenStateCache
@@ -89,7 +90,9 @@ def make_model(args,input_dim,task_dim,n_sources):
     cfg=ModelConfig(visual_dim=args.visual_dim,task_dim=task_dim,hidden_dim=args.hidden_dim,
         n_experts=args.experts,top_k=args.top_k,n_sources=n_sources,use_knowledge=False)
     device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    return cfg,M3Predictor(cfg,input_dim).to(device),device
+    model=(TaskScalePredictor(cfg,input_dim,task_dim) if getattr(args,'scale_head',False)
+           else M3Predictor(cfg,input_dim))
+    return cfg,model.to(device),device
 
 def run(args):
     seed_all(args.seed)
@@ -115,7 +118,8 @@ def run(args):
     meta={'pipeline':'ktrans-k0-k1','task_encoder':args.task_encoder,'heldout_task':args.heldout_task,
           'heldout_cities':unseen_cities,'seed':args.seed,'limit':args.limit,
           'feature_dir':args.feature_dir,'remoteclip_model':args.remoteclip_model,
-          'train_csv':str(Path(args.train_csv).resolve()),'meta_city_fraction':args.meta_city_fraction}
+          'train_csv':str(Path(args.train_csv).resolve()),'meta_city_fraction':args.meta_city_fraction,
+          'scale_head':getattr(args,'scale_head',False)}
     best=float('inf');best_epoch=0
     for epoch in range(1,args.epochs+1):
         tr=loop(model,subsets['train'],args,None,(),device,cache,optimizer=optimizer)
@@ -142,7 +146,7 @@ def evaluate_meta(args):
     raw=torch.load(args.checkpoint,map_location='cpu',weights_only=False)
     meta=raw['meta']
     if meta.get('pipeline')!='ktrans-k0-k1':raise ValueError('Not K0/K1 checkpoint')
-    for key in ('task_encoder','heldout_task','remoteclip_model','limit','seed','meta_city_fraction'):
+    for key in ('task_encoder','heldout_task','remoteclip_model','limit','seed','meta_city_fraction','scale_head'):
         if getattr(args,key)!=meta[key]:raise ValueError(f'Checkpoint config mismatch: {key}')
     vectors=task_embeddings(args) if args.task_encoder=='remoteclip' else {
         task:torch.from_numpy(task_vector(desc,128).copy()) for task,desc in TASK_DESCRIPTIONS.items()}
