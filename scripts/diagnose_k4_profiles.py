@@ -14,7 +14,7 @@ from urban_transfer.ktrans import dataset,meta_indices,make_model
 from urban_transfer.ktrans_text import qwen_task_vectors
 from urban_transfer.checkpoints import load_checkpoint
 
-def load_model(path,feature_dir,text_cache_dir):
+def load_model(path,feature_dir,text_cache_dir,image_root):
     raw=torch.load(path,map_location='cpu',weights_only=False)
     meta=raw['meta'];cfg=raw['config']
     if not meta.get('expert_bank') or not meta.get('normalized_experts'):
@@ -26,7 +26,7 @@ def load_model(path,feature_dir,text_cache_dir):
         remoteclip_model=meta['remoteclip_model'],text_model_id=meta['text_model_id'],
         task_profile=meta['task_profile'],llm_profile_file=None,
         text_cache_dir=text_cache_dir,feature_dir=feature_dir,train_csv=meta['train_csv'],
-        image_root=None,image_column=None,scale_head=False,expert_bank=True,
+        image_root=image_root,image_column=None,scale_head=False,expert_bank=True,
         normalized_experts=True,router_temperature=meta['router_temperature'],
         visual_dim=cfg['visual_dim'],hidden_dim=cfg['hidden_dim'],
         experts=cfg['n_experts'],top_k=cfg['top_k'])
@@ -58,9 +58,9 @@ def corr(a,b):
     if len(a)<2 or np.std(a)<1e-12 or np.std(b)<1e-12:return float('nan')
     return float(np.corrcoef(a,b)[0,1])
 
-def run(a_path,b_path,output,feature_dir,text_cache_dir,batch_size):
-    a,da,sa,ma,device_a=load_model(a_path,feature_dir,text_cache_dir)
-    b,db,sb,mb,device_b=load_model(b_path,feature_dir,text_cache_dir)
+def run(a_path,b_path,output,feature_dir,text_cache_dir,batch_size,image_root):
+    a,da,sa,ma,device_a=load_model(a_path,feature_dir,text_cache_dir,image_root)
+    b,db,sb,mb,device_b=load_model(b_path,feature_dir,text_cache_dir,image_root)
     checks=('heldout_task','seed','limit','meta_city_fraction','train_csv','heldout_cities','source_tasks')
     for key in checks:
         if a[key]!=b[key]:raise ValueError(f'Unpaired checkpoint metadata: {key}')
@@ -117,8 +117,9 @@ def main():
     p.add_argument('--output',required=True,type=Path)
     p.add_argument('--feature-dir',default='runs/m3_features')
     p.add_argument('--text-cache-dir',default='runs/ktrans_text_cache')
+    p.add_argument('--image-root',default='/flash/project_462001391/xiyanxin/Urban_experience/output_files')
     p.add_argument('--batch-size',type=int,default=1024)
     args=p.parse_args()
     run(args.short_checkpoint,args.structured_checkpoint,args.output,
-        args.feature_dir,args.text_cache_dir,args.batch_size)
+        args.feature_dir,args.text_cache_dir,args.batch_size,args.image_root)
 if __name__=='__main__':main()
