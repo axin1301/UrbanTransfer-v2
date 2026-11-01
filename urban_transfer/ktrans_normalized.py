@@ -28,8 +28,14 @@ class NormalizedExpertBank(SemanticExpertBank):
         super().__init__(input_dim,task_vectors,source_tasks,hidden_dim,temperature)
         if set(source_stats)!=set(self.source_tasks):
             raise ValueError('Source moments must exactly match supervised source tasks')
+        self.scale_routing_mode='shared'
         self.register_buffer('source_means',torch.tensor([source_stats[t][0] for t in self.source_tasks],dtype=torch.float32))
         self.register_buffer('source_stds',torch.tensor([source_stats[t][1] for t in self.source_tasks],dtype=torch.float32))
+
+    def set_scale_routing_mode(self,mode='shared'):
+        if mode not in ('shared','semantic','uniform'):
+            raise ValueError(f'Unknown scale routing mode: {mode}')
+        self.scale_routing_mode=mode
 
     def forward(self,batch,knowledge=None):
         h=self.shared(torch.cat([batch['image'].float(),batch['context'].float()],dim=-1))
@@ -50,6 +56,16 @@ class NormalizedExpertBank(SemanticExpertBank):
                         num_classes=len(self.source_tasks)).to(route.dtype)
         # Spatial shape and task scale are explicitly separate.
         spatial=(route*z).sum(-1)
-        mean=route@self.source_means
-        std=route@self.source_stds
+        if self.scale_routing_mode=='shared':
+            scale_route=route
+        elif self.scale_routing_mode=='uniform':
+            scale_route=torch.full_like(route,1./len(self.source_tasks))
+        else:
+            scale_route=self.routing[idx].clone()
+        # Seen-task predictions always use their own task moments.
+        for row,name in enumerate(names):
+            if name in self.task_to_source:
+                scale_route[row]=route[row]
+        mean=scale_route@self.source_means
+        std=scale_route@self.source_stds
         return mean+std*spatial
