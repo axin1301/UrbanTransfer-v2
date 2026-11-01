@@ -40,18 +40,24 @@ def main():
     p.add_argument('--eval-batch-size',type=int,default=1024)
     p.add_argument('--lr',type=float,default=1e-3)
     p.add_argument('--rank',type=int,default=8)
+    p.add_argument('--stable-adapter',action='store_true',help='K5-B2 bounded residual and prediction preservation')
+    p.add_argument('--adapter-cap',type=float,default=0.5)
+    p.add_argument('--preserve-weight',type=float,default=1.0)
     p.add_argument('--seed',type=int,default=42)
     p.add_argument('--feature-dir',default='runs/m3_features')
     p.add_argument('--text-cache-dir',default='runs/ktrans_text_cache')
     p.add_argument('--image-root',default='/flash/project_462001391/xiyanxin/Urban_experience/output_files')
     args=p.parse_args()
     if args.epochs<1 or args.batch_size<1 or args.rank<1 or args.lr<=0:p.error('positive hyperparameters required')
+    if args.stable_adapter and (args.adapter_cap<=0 or args.preserve_weight<0):
+        p.error('adapter-cap must be positive; preserve-weight nonnegative')
     torch.manual_seed(args.seed)
     out=args.output;out.mkdir(parents=True,exist_ok=True)
     meta,ds,splits,bank,device=load_model(args.checkpoint,args.feature_dir,args.text_cache_dir,args.image_root)
     vectors=qwen_task_vectors(root=args.text_cache_dir,model_id=meta['text_model_id'],
         profile=meta['task_profile'],only_cached=True)
-    model=RegionTaskComposer(bank,vectors,rank=args.rank).to(device)
+    model=RegionTaskComposer(bank,vectors,rank=args.rank,
+          adapter_cap=args.adapter_cap if args.stable_adapter else None).to(device)
     opt=torch.optim.AdamW([v for v in model.parameters() if v.requires_grad],lr=args.lr,weight_decay=1e-4)
     train_rows=ds.df.iloc[splits['train']]
     if meta['heldout_task'] in set(train_rows.indicator_column):
@@ -77,6 +83,8 @@ def main():
             loss=((aux['spatial']-target_std)**2).mean()
             # Mild adapter regularization; no heldout labels in training.
             loss=loss+1e-4*(aux['residual']**2).mean()
+            if args.stable_adapter:
+                loss=loss+args.preserve_weight*aux['preserve_loss']
             opt.zero_grad(set_to_none=True);loss.backward()
             torch.nn.utils.clip_grad_norm_([p for p in model.parameters() if p.requires_grad],1.)
             opt.step();s+=float(loss.detach())*len(batch['target']);n+=len(batch['target'])
@@ -84,7 +92,10 @@ def main():
     torch.save({'composer':{k:v.cpu() for k,v in model.state_dict().items()
                              if not k.startswith('bank.')},
                 'checkpoint':str(args.checkpoint),
-                'epoch':args.epochs,'seed':args.seed,'rank':args.rank},
+                'epoch':args.epochs,'seed':args.seed,'rank':args.rank,
+                'adapter_cap':args.adapter_cap if args.stable_adapter else None,
+                'preserve_weight':args.preserve_weight if args.stable_adapter else None,
+                'version':'k5b2' if args.stable_adapter else 'k5b'},
                out/'composer.pt')
     rows=[]
     for split in ('meta_SCUI','meta_UCUI'):
@@ -102,6 +113,8 @@ def main():
         'heldout_task':meta['heldout_task'],'heldout_cities':meta['heldout_cities'],
         'training_split':'outer train only','own_source_expert_masked':True,
         'scale_routing':'frozen semantic','epochs':args.epochs,
+        'stable_adapter':args.stable_adapter,'adapter_cap':args.adapter_cap if args.stable_adapter else None,
+        'preserve_weight':args.preserve_weight if args.stable_adapter else None,
         'warning':'Development-only: K4 best.pt previously chosen by meta validation'},indent=2))
     print('Saved',out/'evaluation.csv')
 
