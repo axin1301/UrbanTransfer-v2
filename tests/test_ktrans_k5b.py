@@ -16,7 +16,8 @@ class K5BTests(unittest.TestCase):
                'task_name':['a','a','b','b','a']}
         # Evaluation starts exactly at frozen semantic K4 prediction.
         with torch.no_grad():
-            self.assertTrue(torch.allclose(model(batch),bank(batch),atol=1e-6))
+            unseen={**batch,'task_name':['c']*5}
+            self.assertTrue(torch.allclose(model(unseen),bank(unseen),atol=1e-6))
         out,aux=model(batch,exclude_own=True,return_aux=True)
         self.assertTrue((aux['weights'][0,0]<1e-6).item())
         self.assertTrue((aux['weights'][2,1]<1e-6).item())
