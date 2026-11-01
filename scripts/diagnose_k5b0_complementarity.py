@@ -11,27 +11,23 @@ import numpy as np
 from scripts.diagnose_k4_profiles import load_model
 from scripts.run_ktrans_k5a import extract_outputs,safe_corr
 
-def metrics(y,p):
-    return safe_corr(y,p),float(np.mean((p-y)**2))
-
 def diagnose(z,y,sources,pseudo,protocol):
     n=len(sources)
     if z.shape!=(n,len(y)):raise ValueError('Unexpected prediction shape')
     rows=[]
     all_pred=z.mean(axis=0)
-    all_r,all_mse=metrics(y,all_pred)
+    all_r=safe_corr(y,all_pred)
     for j,source in enumerate(sources):
         other=np.delete(z,j,axis=0).mean(axis=0)
-        loo_r,loo_mse=metrics(y,other)
-        single_r,_=metrics(y,z[j])
+        loo_r=safe_corr(y,other)
+        single_r=safe_corr(y,z[j])
         # This is the true marginal contribution of expert j to a
         # uniform ensemble; never use target labels to set inference weights.
         rows.append({'pseudo_target':pseudo,'protocol':protocol,'expert':source,
                      'n':len(y),'single_pearson':single_r,
                      'leave_one_out_pearson':loo_r,
                      'uniform_pearson':all_r,
-                     'delta_pearson':all_r-loo_r,
-                     'delta_mse':loo_mse-all_mse})
+                     'delta_pearson':all_r-loo_r})
     pair_rows=[]
     for i in range(n):
         for j in range(i+1,n):
@@ -86,8 +82,7 @@ def main():
     for row in all_rows:
         print(f'{row["pseudo_target"]:<30} {row["expert"]:<30} '
               f'single={row["single_pearson"]:.3f} '
-              f'delta={row["delta_pearson"]:+.3f} '
-              f'pair_MSE_gain={row["delta_mse"]:+.3f}')
+              f'delta={row["delta_pearson"]:+.3f}')
     print('Saved to',result_dir)
 
 if __name__=='__main__':main()
