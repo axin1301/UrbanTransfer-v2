@@ -37,7 +37,7 @@ class RegionTaskComposer(nn.Module):
         self.adapter_gate=nn.Sequential(nn.Linear(self.n+4,32),nn.GELU(),nn.Linear(32,rank))
         self.adapter_up=nn.Linear(rank,h,bias=False)
         nn.init.zeros_(self.route[-1].weight);nn.init.zeros_(self.route[-1].bias)
-        nn.init.zeros_(self.adapter_up.weight);nn.init.zeros_(self.adapter_up.bias)
+        nn.init.zeros_(self.adapter_up.weight)  # bias=False
 
     def train(self,mode=True):
         super().train(mode)
