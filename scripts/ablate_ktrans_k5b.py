@@ -22,7 +22,8 @@ def main():
     from urban_transfer.ktrans_text import qwen_task_vectors
     vectors=qwen_task_vectors(root=args.text_cache_dir,model_id=meta['text_model_id'],
                               profile=meta['task_profile'],only_cached=True)
-    model=RegionTaskComposer(bank,vectors,rank=saved['rank']).to(device)
+    model=RegionTaskComposer(bank,vectors,rank=saved['rank'],
+        adapter_cap=saved.get('adapter_cap')).to(device)
     missing,unexpected=model.load_state_dict(saved['composer'],strict=False)
     allowed=[k for k in missing if k.startswith('bank.')]
     if len(allowed)!=len(missing) or unexpected:

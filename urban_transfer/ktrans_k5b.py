@@ -10,7 +10,7 @@ from torch import nn
 import torch.nn.functional as F
 
 class RegionTaskComposer(nn.Module):
-    def __init__(self,bank,task_vectors,rank=8,route_strength=1.,adapter_strength=.1):
+    def __init__(self,bank,task_vectors,rank=8,route_strength=1.,adapter_strength=.1,adapter_cap=None):
         super().__init__()
         self.bank=bank
         for p in self.bank.parameters():p.requires_grad_(False)
@@ -23,6 +23,7 @@ class RegionTaskComposer(nn.Module):
         self.rank=rank
         self.route_strength=route_strength
         self.adapter_strength=adapter_strength
+        self.adapter_cap=adapter_cap
         vec=F.normalize(torch.stack([task_vectors[t].float() for t in self.task_names]),dim=-1)
         src=F.normalize(torch.stack([task_vectors[t].float() for t in self.source_tasks]),dim=-1)
         self.register_buffer('task_signature',vec@src.T)
@@ -36,7 +37,7 @@ class RegionTaskComposer(nn.Module):
         self.adapter_gate=nn.Sequential(nn.Linear(self.n+4,32),nn.GELU(),nn.Linear(32,rank))
         self.adapter_up=nn.Linear(rank,h,bias=False)
         nn.init.zeros_(self.route[-1].weight);nn.init.zeros_(self.route[-1].bias)
-        nn.init.zeros_(self.adapter_up.weight);nn.init.zeros_(self.adapter_up.bias)
+        nn.init.zeros_(self.adapter_up.weight)  # bias=False
 
     def train(self,mode=True):
         super().train(mode)
@@ -53,8 +54,18 @@ class RegionTaskComposer(nn.Module):
         sig=self.task_signature[indices]
         gate=torch.tanh(self.adapter_gate(torch.cat([sig,context],-1)))
         residual=self.adapter_up(self.adapter_down(h)*gate)
+        if self.adapter_cap is not None:
+            if self.adapter_cap<=0:raise ValueError('adapter_cap must be positive')
+            # Bound each residual coordinate without any target-label statistics.
+            residual=self.adapter_cap*torch.tanh(residual/self.adapter_cap)
         h_adapt=h+self.adapter_strength*residual
         z=torch.cat([expert(h_adapt) for expert in self.bank.experts],dim=-1)
+        if return_aux and self.adapter_cap is not None:
+            with torch.no_grad():
+                z_frozen=torch.cat([expert(h) for expert in self.bank.experts],dim=-1)
+            preserve=(z-z_frozen).square().mean()
+        else:
+            preserve=z.new_zeros(())
         features=torch.cat([sig,context,self.summary(h)],-1)
         delta=self.route(features)
         prior=self.bank.routing[indices].clamp_min(1e-8)
@@ -76,5 +87,5 @@ class RegionTaskComposer(nn.Module):
             std=prior@self.bank.source_stds
         prediction=mean+std*spatial
         if return_aux:
-            return prediction,{'weights':weights,'prior':prior,'residual':residual,'spatial':spatial}
+            return prediction,{'weights':weights,'prior':prior,'residual':residual,'spatial':spatial,'preserve_loss':preserve}
         return prediction
