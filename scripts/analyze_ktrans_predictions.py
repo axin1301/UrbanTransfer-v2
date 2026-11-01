@@ -105,6 +105,10 @@ def evaluate_checkpoint(path,cli):
                                vectors,meta.get('source_tasks'),meta.get('source_stats'))
     load_checkpoint(path,model=model,device=device)
     model.eval()
+    if cli.scale_routing_mode!='shared':
+        if not getattr(args,'normalized_experts',False):
+            raise ValueError('--scale-routing-mode requires normalized expert bank')
+        model.set_scale_routing_mode(cli.scale_routing_mode)
     if cli.routing_mode!='semantic':
         if not args.expert_bank:
             raise ValueError('--routing-mode uniform/random requires a K2-B1 expert-bank checkpoint')
@@ -130,7 +134,7 @@ def evaluate_checkpoint(path,cli):
         stat=results[name]
         print(f'{Path(path).parent.name:>28} {name:>9} '
               f'n={stat["n"]} mse={stat["mse"]:.3f} r2={stat["r2"]:.3f} '
-              f'bias={stat["bias"]:.3f} pearson={stat["pearson"] if stat["pearson"] is not None else "N/A"}',
+              f'bias={stat["bias"]:.3f} pearson={stat["pearson"]:.3f}' if stat["pearson"] is not None else f'bias={stat["bias"]:.3f} pearson=N/A',
               flush=True)
     return {
         'checkpoint':str(Path(path).resolve()),
@@ -140,6 +144,7 @@ def evaluate_checkpoint(path,cli):
         'scale_head':args.scale_head,
         'routing_mode':cli.routing_mode,
         'routing_seed':cli.routing_seed,
+        'scale_routing_mode':cli.scale_routing_mode,
         'metrics':results,
     },predictions
 
@@ -160,6 +165,7 @@ def main():
     parser.add_argument('--save-predictions',action='store_true')
     parser.add_argument('--routing-mode',choices=['semantic','uniform','random'],default='semantic',
                         help='K2-B1 evaluation-only source expert route override')
+    parser.add_argument('--scale-routing-mode',choices=['shared','semantic','uniform'],default='shared')
     parser.add_argument('--routing-seed',type=int,default=42)
     args=parser.parse_args()
     if args.batch_size<1:parser.error('--batch-size must be positive')
@@ -167,7 +173,7 @@ def main():
     all_results=[]
     for n,path in enumerate(args.checkpoint):
         result,rows=evaluate_checkpoint(path,args)
-        result['label']=Path(path).parent.name+('_'+args.routing_mode if args.routing_mode!='semantic' else '')
+        result['label']=Path(path).parent.name+('_'+args.routing_mode if args.routing_mode!='semantic' else '')+('_scale_'+args.scale_routing_mode if args.scale_routing_mode!='shared' else '')
         all_results.append(result)
         if args.save_predictions:
             name=f'predictions_{n}_{Path(path).parent.name}.csv'
