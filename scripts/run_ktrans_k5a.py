@@ -50,27 +50,14 @@ def extract_outputs(model,ds,indices,device,batch_size):
     return np.asarray(cols,dtype=float),np.asarray(targets,dtype=float)
 
 def outer_predictions(model,ds,splits,device,batch_size,route,scale_route):
-    model.set_routing_mode('semantic')
-    model.set_scale_routing_mode('semantic')
-    # The fixed learned spatial route is used for the outer unseen task only.
-    for task in (model.task_names):
-        if task not in model.task_to_source:
-            idx=model.task_to_all[task]
-            model.routing[idx]=torch.tensor(route,dtype=model.routing.dtype,device=model.routing.device)
-    if scale_route=='uniform':
-        model.set_scale_routing_mode('uniform')
-    elif scale_route=='semantic':
-        # Restore source-only *original* semantic route for scale through a
-        # separate eval route mode: manual prediction below is safer.
-        pass
+    # Evaluate a supplied spatial route directly, without mutating model buffers.
+    # Scale always uses the original, frozen semantic route in this prototype.
     stats={}
     for protocol in ('meta_SCUI','meta_UCUI'):
         z,y=extract_outputs(model,ds,splits[protocol],device,batch_size)
         spatial=route@z
-        if scale_route=='uniform':
-            q=np.ones(len(model.source_tasks))/len(model.source_tasks)
-        else:
-            q=model._k5_original_route
+        if scale_route!='semantic':raise ValueError('K5-A freezes semantic scale routing')
+        q=model._k5_original_route
         mean=float(q@model.source_means.cpu().numpy())
         std=float(q@model.source_stds.cpu().numpy())
         pred=mean+std*spatial
