@@ -57,12 +57,12 @@ class NormalizedExpertBank(SemanticExpertBank):
         # Spatial shape and task scale are explicitly separate.
         spatial=(route*z).sum(-1)
         if self.scale_routing_mode=='shared':
-            scale_route=route
+            scale_route=route.clone()
         elif self.scale_routing_mode=='uniform':
             scale_route=torch.full_like(route,1./len(self.source_tasks))
         else:
             scale_route=self.routing[idx].clone()
-        # Seen-task predictions always use their own task moments.
+        # Use a distinct tensor: reassigning rows of an alias after (route*z)\n        # invalidates the saved route needed by MulBackward.\n        # Seen-task predictions always use their own task moments.
         for row,name in enumerate(names):
             if name in self.task_to_source:
                 scale_route[row]=route[row]
