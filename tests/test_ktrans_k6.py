@@ -42,6 +42,20 @@ class K6Tests(unittest.TestCase):
                 self.assertEqual(result.shape,(4,))
                 self.assertTrue(torch.isfinite(result).all())
 
+    def test_new_factorial_variants(self):
+        self.assertEqual(VARIANTS['k6_spatial'],('regional_transfer',True,'semantic'))
+        self.assertEqual(VARIANTS['k6_scale_only'],('transfer',False,'k5d'))
+        with torch.no_grad():
+            transfer=self.model.forward_variant(self.unseen,'k5a').numpy()
+            scale=self.model.forward_variant(self.unseen,'k6_scale_only').numpy()
+            spatial=self.model.forward_variant(self.unseen,'k6_spatial').numpy()
+            full=self.model.forward_variant(self.unseen,'k6_full').numpy()
+        # Positive affine changes preserve Pearson on a fixed spatial field.
+        if transfer.std()>1e-7 and scale.std()>1e-7:
+            self.assertAlmostEqual(np.corrcoef(transfer,scale)[0,1],1.,places=5)
+        if spatial.std()>1e-7 and full.std()>1e-7:
+            self.assertAlmostEqual(np.corrcoef(spatial,full)[0,1],1.,places=5)
+
     def test_transfer_prior_normalization(self):
         self.assertAlmostEqual(normalize_route([2,3,5]).sum(),1.)
         with self.assertRaises(ValueError):normalize_route([-1,2])
