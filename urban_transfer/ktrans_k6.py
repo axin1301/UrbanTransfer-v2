@@ -19,6 +19,8 @@ VARIANTS={
     'k5b2':('regional',True,'semantic'),
     'k5c':('regional',True,'k5c'),
     'k5d':('regional',True,'k5d'),
+    'k6_spatial':('regional_transfer',True,'semantic'),
+    'k6_scale_only':('transfer',False,'k5d'),
     'k6_full':('regional_transfer',True,'k5d'),
 }
 
