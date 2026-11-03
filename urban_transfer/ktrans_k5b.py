@@ -87,5 +87,5 @@ class RegionTaskComposer(nn.Module):
             std=prior@self.bank.source_stds
         prediction=mean+std*spatial
         if return_aux:
-            return prediction,{'weights':weights,'prior':prior,'residual':residual,'spatial':spatial,'preserve_loss':preserve}
+            return prediction,{'weights':weights,'prior':prior,'residual':residual,'spatial':spatial,'expert_outputs':z,'preserve_loss':preserve}
         return prediction
