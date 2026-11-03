@@ -11,6 +11,7 @@ import torch
 from torch.utils.data import DataLoader,Subset
 from scripts.run_ktrans_k6 import load_components,metrics
 from urban_transfer.ktrans_k61 import AnchoredRegionalGate,build_source_transfer_routes
+from urban_transfer.ktrans_losses import transfer_loss
 from urban_transfer.ktrans_text import qwen_task_vectors
 
 def evaluate(gate_model,ds,indices,device,batch_size):
@@ -47,6 +48,9 @@ def main():
     p.add_argument('--epochs',type=int,default=12)
     p.add_argument('--lr',type=float,default=1e-3)
     p.add_argument('--gate-penalty',type=float,default=.01)
+    p.add_argument('--loss-mode',choices=['mse','corr','rank','combined'],default='mse')
+    p.add_argument('--corr-weight',type=float,default=.2)
+    p.add_argument('--rank-weight',type=float,default=.1)
     p.add_argument('--batch-size',type=int,default=512)
     p.add_argument('--eval-batch-size',type=int,default=1024)
     p.add_argument('--seed',type=int,default=42)
@@ -55,6 +59,7 @@ def main():
     p.add_argument('--image-root',default='/flash/project_462001391/xiyanxin/Urban_experience/output_files')
     args=p.parse_args()
     if (args.epochs<=0 or args.lr<=0 or args.gate_penalty<0 or
+        args.corr_weight<0 or args.rank_weight<0 or
         args.batch_size<=0 or args.eval_batch_size<=0):
         p.error('Invalid training hyperparameters')
     torch.manual_seed(args.seed)
@@ -85,7 +90,9 @@ def main():
             _,aux=gate_model(batch,exclude_own=True,return_aux=True)
             own=torch.tensor([composer.source_index[t] for t in batch['task_name']],device=device)
             label_std=(batch['target']-composer.bank.source_means[own])/composer.bank.source_stds[own]
-            loss=(aux['spatial']-label_std).square().mean()
+            loss,parts=transfer_loss(aux['spatial'],label_std,
+                batch['task_name'],batch['city'],mode=args.loss_mode,
+                corr_weight=args.corr_weight,rank_weight=args.rank_weight)
             loss=loss+args.gate_penalty*aux['gate'].square().mean()
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
@@ -99,7 +106,9 @@ def main():
                 'k5a_protocol':str(args.k5a_protocol),
                 'outer_task':meta['heldout_task'],
                 'epochs':args.epochs,'seed':args.seed,
-                'gate_penalty':args.gate_penalty},args.output/'gate_last.pt')
+                'gate_penalty':args.gate_penalty,
+                'loss_mode':args.loss_mode,'corr_weight':args.corr_weight,
+                'rank_weight':args.rank_weight},args.output/'gate_last.pt')
     rows=[]
     for protocol in ('meta_SCUI','meta_UCUI'):
         score,gate_stats=evaluate(gate_model,ds,splits[protocol],device,args.eval_batch_size)
@@ -119,9 +128,13 @@ def main():
         'pseudo_target_policy':'own source expert excluded in both regional and transfer distributions',
         'adapter':'disabled','scale':'frozen semantic',
         'gate_penalty':args.gate_penalty,
+        'loss_mode':args.loss_mode,'corr_weight':args.corr_weight,
+        'rank_weight':args.rank_weight,
         'gate_init_logit':-2.,'epochs':args.epochs,
         'warning':'Development-only; underlying K4 best.pt previously meta-selected'
     },indent=2))
+    print(f'[loss] mode={args.loss_mode} corr_weight={args.corr_weight:.3f} '
+          f'rank_weight={args.rank_weight:.3f}',flush=True)
     print('Saved',args.output/'evaluation.csv',flush=True)
 
 if __name__=='__main__':main()
