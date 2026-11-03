@@ -55,7 +55,7 @@ python -u scripts/run_ktrans_k6.py \
   --eval-batch-size 1024
 ```
 
-The eight **fixed variants** are:
+The ten **fixed variants** are:
 
 | ID | Spatial route | Adapter | Scale |
 | --- | --- | --- | --- |
@@ -66,6 +66,8 @@ The eight **fixed variants** are:
 | k5b2 | region dynamic | on | semantic |
 | k5c | region dynamic | on | learned K5-C |
 | k5d | region dynamic | on | measurement K5-D |
+| k6_spatial | region dynamic + K5-A transfer | on | semantic |
+| k6_scale_only | K5-A transfer | off | K5-D |
 | k6_full | region dynamic + K5-A transfer | on | K5-D |
 
 All protocols `meta_SCUI`, `meta_UCSI` and `meta_UCUI` are evaluated
@@ -74,14 +76,14 @@ inference explicitly uses the frozen task-specific K4 expert (same for
 all variants); this avoids misrepresenting an unsupervised task
 transfer extension as an improvement to supervised seen-task inference.
 
-`evaluation.csv` has 24 rows (8 variants × 3 protocols). Print only
+`evaluation.csv` has 30 rows (10 variants × 3 protocols). Print only
 selected rows to avoid terminal flooding:
 
 ```bash
 python - <<'PY'
 import pandas as pd
 d=pd.read_csv('runs/k6_digital_total_cell/evaluation.csv')
-d=d[d.variant.isin(['k4','k5a','k5b2','k6_full'])]
+d=d[d.variant.isin(['k4','k5a','k6_spatial','k6_scale_only','k6_full'])]
 print(d[['variant','protocol','mse','r2','pearson','bias']].round(3).to_string(index=False))
 PY
 ```
@@ -132,3 +134,16 @@ quietly dropping tasks and writes `aggregate.csv` and per-fold
   target-indicator test partitions.
 - Always audit `protocol.json` and K5-A `protocol.json` to verify
   matched checkpoints, source expert ordering, and no target statistics.
+
+## Focused factorial interpretation
+
+The two additional inference-only variants isolate previously entangled
+components without re-training. Compare `k5a` vs `k6_spatial` to measure
+the region router + stable adapter under *the same frozen semantic scale*.
+Compare `k5a` vs `k6_scale_only` to measure K5-D scale changes with
+*identical K5-A spatial predictions*. Compare `k6_spatial` vs `k6_full`
+to measure scale effects on the combined spatial field. Because all scales
+are positive task-level affine transforms, paired Pearson values should be
+identical to reporting precision. K6's extra changes are inference-only
+ablation of jointly trained components, not isolated retrained models.
+Do not select a per-task winner using outer validation labels.
