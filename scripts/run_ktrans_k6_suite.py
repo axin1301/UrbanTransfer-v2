@@ -77,7 +77,7 @@ def main():
     if len(folds)<6:print('Partial development summary; do not label as six-fold aggregate.')
     for protocol in ('meta_SCUI','meta_UCSI','meta_UCUI'):
         print('\n'+protocol)
-        for variant in ('k4','k5a','router_only','adapter_only','k5b2','k5c','k5d','k6_full'):
+        for variant in ('k4','k5a','router_only','adapter_only','k5b2','k5c','k5d','k6_spatial','k6_scale_only','k6_full'):
             rows=[q for q in all_rows if q['variant']==variant and q['protocol']==protocol]
             if not rows:continue
             import numpy as np
