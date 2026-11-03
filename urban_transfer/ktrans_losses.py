@@ -19,7 +19,9 @@ def grouped_correlation_loss(pred,target,tasks,min_size=8,epsilon=1e-6):
         denom=torch.linalg.vector_norm(pc)*torch.linalg.vector_norm(yc)
         if float(torch.linalg.vector_norm(yc).detach())<epsilon:continue
         corr=(pc*yc).sum()/(denom+epsilon)
-        losses.append(1-corr)
+        # Float32 roundoff can put Pearson just outside [-1, 1].
+        # Clamp to its mathematical domain to prevent tiny negative losses.
+        losses.append(1-corr.clamp(-1.,1.))
     return torch.stack(losses).mean() if losses else pred.sum()*0.
 
 def city_pairwise_rank_loss(pred,target,tasks,cities,margin=.2,max_pairs=256):

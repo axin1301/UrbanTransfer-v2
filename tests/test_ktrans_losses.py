@@ -17,6 +17,15 @@ class TransferLossTests(unittest.TestCase):
         self.assertIsNotNone(pred.grad)
         self.assertTrue(torch.isfinite(pred.grad).all())
 
+    def test_perfect_correlation_never_negative(self):
+        # Regression: float32 reductions may otherwise give Pearson > 1.
+        y=torch.arange(0.,32.)
+        tasks=['education_accessibility']*len(y)
+        for scale in (1.,1.1,2.3):
+            result=grouped_correlation_loss(y*scale,y,tasks)
+            self.assertGreaterEqual(float(result),0.)
+            self.assertLess(float(result),1e-5)
+
     def test_corr_does_not_compare_different_tasks(self):
         pred=self.y.clone()
         self.assertAlmostEqual(float(grouped_correlation_loss(
