@@ -83,6 +83,8 @@ def main():
             import numpy as np
             print(f'  {variant:<14} n_tasks={len(rows)} '
                   f'macro_MSE={np.mean([float(q["mse"]) for q in rows]):.3f} '
+                  f'macro_nMSE={np.mean([1.-float(q["r2"]) for q in rows]):.3f} '
+                  f'macro_R2={np.mean([float(q["r2"]) for q in rows]):.3f} '
                   f'macro_Pearson={np.mean([float(q["pearson"]) for q in rows]):.3f}')
     print('\nSaved:',args.output/'aggregate.csv')
 
