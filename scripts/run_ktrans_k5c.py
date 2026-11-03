@@ -9,6 +9,7 @@ from scripts.diagnose_k4_profiles import load_model
 from scripts.run_ktrans_k5a import safe_corr
 from urban_transfer.ktrans_k5b import RegionTaskComposer
 from urban_transfer.ktrans_k5c import IndependentScaleRouter
+from urban_transfer.ktrans_k5d import MeasurementAwareScaleRouter
 from urban_transfer.ktrans_text import qwen_task_vectors
 
 def metrics(y,p):
@@ -20,6 +21,7 @@ def metrics(y,p):
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--composer-checkpoint',required=True,type=Path)
+    p.add_argument('--measurement-aware',action='store_true',help='also compare K5-D label-free measurement-aware scale')
     p.add_argument('--output',default='runs/k5c_scale',type=Path)
     p.add_argument('--eval-batch-size',default=1024,type=int)
     p.add_argument('--feature-dir',default='runs/m3_features')
@@ -42,6 +44,8 @@ def main():
         raise AssertionError('Outer target leaked into source statistics')
     cal=IndependentScaleRouter(vectors,meta['source_stats'])
     pred_mean,pred_std=cal.predict(target)
+    aware=MeasurementAwareScaleRouter(vectors,meta['source_stats']) if args.measurement_aware else None
+    aware_mean,aware_std=aware.predict(target) if aware is not None else (None,None)
     # K4 and K5-B2 spatial routes share the same frozen semantic scale,
     # compare ONLY scale changes on identical K5-B2 spatial predictions.
     idx=bank.task_to_all[target]
@@ -59,8 +63,11 @@ def main():
                 spatial.extend(aux['spatial'].cpu().numpy().tolist())
                 vals.extend(batch['target'].cpu().numpy().tolist())
         y=np.asarray(vals);z=np.asarray(spatial)
-        for name,m,s in [('k5b2_semantic_scale',mu,sigma),
-                         ('k5c_learned_scale',pred_mean,pred_std)]:
+        variants=[('k5b2_semantic_scale',mu,sigma),
+                  ('k5c_learned_scale',pred_mean,pred_std)]
+        if aware is not None:
+            variants.append(('k5d_measurement_scale',aware_mean,aware_std))
+        for name,m,s in variants:
             result={'variant':name,'protocol':protocol,**metrics(y,m+s*z),
                     'scale_mean':m,'scale_std':s}
             rows.append(result)
@@ -75,10 +82,15 @@ def main():
         'frozen_semantic_moments':[mu,sigma],
         'learned_moments':[pred_mean,pred_std],
         'scale_ridge_coef':cal.coef.tolist(),'penalty':cal.penalty,
+        'measurement_aware':aware.components(target) if aware is not None else None,
+        'measurement_blended_moments':[aware_mean,aware_std] if aware is not None else None,
         'warning':'Development data for evaluation ONLY; outer K4 checkpoint was meta-selected'
     },indent=2))
     print(f'Scale moments: semantic=({mu:.3f},{sigma:.3f}) '
           f'learned=({pred_mean:.3f},{pred_std:.3f})')
+    if aware is not None:
+        print(f'K5-D source-only blend alpha={aware.alpha:.3f} '
+              f'mean={aware_mean:.3f} std={aware_std:.3f}')
     print('Saved',args.output/'evaluation.csv')
 
 if __name__=='__main__':main()
