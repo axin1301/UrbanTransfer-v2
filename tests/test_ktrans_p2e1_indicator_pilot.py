@@ -100,6 +100,51 @@ class IndicatorPilotTests(unittest.TestCase):
                 freeze_manifest(path,modified)
             self.assertEqual(path.read_bytes(),old_bytes)
 
+    def test_qwen_fenced_json_parser_and_invalid_schema_rejection(self):
+        from urban_transfer.ktrans_p2e1_pilot import parse_json_object
+        task=TASKS[0]
+        answer=json.dumps(fake(task,False))
+        self.assertIsNotNone(parse('```json\\n'+answer+'\\n```',
+                                   TASKS,task,False))
+        self.assertIsNotNone(parse('Generated JSON:\\n'+answer,
+                                   TASKS,task,False))
+        self.assertIsNone(parse(answer+'\\n'+answer,TASKS,task,False))
+        self.assertIsNone(parse('{"experts":',TASKS,task,False))
+        self.assertIsNone(parse_json_object(None))
+        malformed=fake(task,False)
+        malformed['experts'][TASKS[1]]['region_support']=2
+        self.assertIsNone(parse(json.dumps(malformed),TASKS,task,False))
+
+    def test_batch_grouping_and_per_job_identity(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from scripts.run_ktrans_p2e1_indicator_pilot import run_batched_jobs
+        spec=catalog()
+        jobs=make_jobs(sample_source_rows(rows(),TASKS,1),TASKS,spec,
+                       'Qwen/Qwen3-VL-32B-Instruct',262144)
+        # 10 text-only + 10? actually five source tasks * two image
+        # arms * two splits = 20 image requests.
+        outputs=[]
+        calls=[]
+        a=SimpleNamespace(batch_size=8,max_new_tokens=1536,source_tasks=TASKS)
+        def mock_infer(model,processor,chunk,max_new):
+            calls.append(list(chunk))
+            return [json.dumps(fake(j['task'],j['image_path'] is not None))
+                    for j in chunk]
+        with patch('urban_transfer.ktrans_p2e1_pilot.parse', wraps=parse):
+            with patch('scripts.run_ktrans_p2e1_indicator_pilot.infer_batch',
+                       side_effect=mock_infer):
+                run_batched_jobs(None,None,jobs,a,outputs.append)
+        self.assertEqual(len(outputs),len(jobs))
+        self.assertEqual([x['key'] for x in outputs],
+                         [x['key'] for x in jobs])
+        self.assertTrue(all(x['parsed'] is not None for x in outputs))
+        self.assertTrue(all(len(chunk)<=8 for chunk in calls))
+        self.assertTrue(all(len({j['image_path'] is not None for j in chunk})==1
+                            for chunk in calls))
+        self.assertTrue(all(x['model']=='Qwen/Qwen3-VL-32B-Instruct'
+                            for x in outputs))
+
     def test_strict_json_parse_and_unknown_capability(self):
         task=TASKS[0]
         self.assertIsNotNone(parse(json.dumps(fake(task,False)),TASKS,task,False))
