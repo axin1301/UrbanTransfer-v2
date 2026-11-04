@@ -87,6 +87,7 @@ def main():
     p.add_argument('--max-pixels',type=int,default=262144)
     p.add_argument('--max-new-tokens',type=int,default=440)
     p.add_argument('--batch-size',type=int,default=4)
+    p.add_argument('--dry-run',action='store_true',help='Print VLM cache coverage without loading the 8B model')
     p.add_argument('--max-new-jobs',type=int,default=0,
                    help='0=all outstanding; positive limit for incremental smoke tests')
     args=p.parse_args()
@@ -100,6 +101,7 @@ def main():
     pending=get_pending(jobs,records)
     print(f'[k7d-cache] total={len(jobs)} cached_valid={len(jobs)-len(pending)} '
           f'pending={len(pending)}',flush=True)
+    if args.dry_run:return
     if args.max_new_jobs:pending=pending[:args.max_new_jobs]
     if not pending:return
     if not torch.cuda.is_available():
