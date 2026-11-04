@@ -5,6 +5,8 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from scripts.run_ktrans_p2e1_indicator_pilot import cache_records,is_valid
 from urban_transfer.ktrans_p2e1_pilot import parse,descriptive_audit
 from urban_transfer.ktrans_p2e1_eval import collect_hypotheses,run_lopo
+from scripts.run_ktrans_p2b1_source_lopo import text_descriptors
+from urban_transfer.ktrans_p2b1 import aligned_samples,source_lopo,summarize_source_lopo
 
 def write_csv(p,rows):
     if not rows:raise ValueError('Empty metric rows')
@@ -16,6 +18,11 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--pilot',type=Path,default=Path('runs/ktrans_competence/p2e1_indicator_relation_source_dev'))
     p.add_argument('--input',type=Path,default=Path('runs/ktrans_competence/education_all_outer_train_dev'))
+    p.add_argument('--knowledge-cache',type=Path,default=Path('runs/ktrans_competence/full_source_evidence.jsonl'))
+    p.add_argument('--reuse-cache',type=Path,default=Path('runs/k7b_pilot/evidence.jsonl'))
+    p.add_argument('--extra-reuse-cache',type=Path,action='append',default=[Path('runs/k7d_education/evidence.jsonl')])
+    p.add_argument('--model',default='Qwen/Qwen3-VL-8B-Instruct')
+    p.add_argument('--max-pixels',type=int,default=262144)
     p.add_argument('--alpha',type=float,default=10.)
     p.add_argument('--temperature',type=float,default=.5)
     a=p.parse_args()
@@ -40,6 +47,30 @@ def main():
     hypotheses=collect_hypotheses(manifest,valid)
     task,macro=run_lopo(evidence,manifest,hypotheses,sources,
                         a.alpha,a.temperature)
+    # Exact matched pilot baseline: original P2-B1 Task–Expert,
+    # trained only on OTHER source pseudo tasks' SCUI.
+    evidence_manifest=json.loads(Path(original['manifest']).read_text())
+    descriptors,keys=text_descriptors(evidence_manifest,
+        [a.reuse_cache,*a.extra_reuse_cache,a.knowledge_cache],
+        a.model,a.max_pixels,sources)
+    allowed={(j['task'],j['split'],j['tile_id']) for j in manifest['tiles']}
+    sampled=[r for r in evidence if
+             (r['pseudo_task'],r['inner_partition'],r['tile_id']) in allowed]
+    samples=aligned_samples(sampled,original['outer_target_excluded'],sources)
+    base=source_lopo(samples,sources,descriptors,a.alpha,a.temperature,seed=plan['seed'])
+    base_task,base_macro=summarize_source_lopo(base)
+    base_task=[{**row,'mode':row.pop('model')} for row in base_task
+               if row['model']=='task_expert' and row['inner_partition']=='meta_UCUI']
+    base_macro=[{**row,'mode':row.pop('model')} for row in base_macro
+                if row['model']=='task_expert' and row['inner_partition']=='meta_UCUI']
+    if len(base_task)!=5 or len(base_macro)!=1:
+        raise ValueError('Incomplete matched Task–Expert baseline')
+    task+=base_task
+    macro+=[{'mode':'task_expert','n_tasks':base_macro[0]['n_source_pseudo_tasks'],
+             'n_tiles':base_macro[0]['n_tiles'],
+             'macro_pairwise_accuracy':base_macro[0]['macro_pairwise_accuracy'],
+             'macro_top1_accuracy':base_macro[0]['macro_top1_accuracy'],
+             'macro_mse_ratio_to_uniform':base_macro[0]['macro_mse_ratio_to_uniform']}]
     write_csv(a.pilot/'p2e1_source_lopo_task.csv',task)
     write_csv(a.pilot/'p2e1_source_lopo_macro.csv',macro)
     for row in macro:
