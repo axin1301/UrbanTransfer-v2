@@ -43,6 +43,20 @@ class SourceCompetenceP2ATests(unittest.TestCase):
         self.assertEqual((row['n_low'],row['n_high'],row['n_tied']), (5,5,0))
         self.assertAlmostEqual(row['high_minus_low_relative_loss'],-2.)
 
+    def test_fractional_wins_split_ties_per_tile(self):
+        rows=fixture()
+        # On one tile both experts have exactly the same squared loss.
+        for r in rows:
+            if r['tile_id']=='meta_SCUI:0':
+                r['squared_error']=2.
+        summary_rows=summary(samples_from_rows(rows,'outer'))
+        scui={r['expert']:r for r in summary_rows
+              if r['inner_partition']=='meta_SCUI'}
+        self.assertAlmostEqual(scui['expert_a']['fractional_top1_win_rate'],.55)
+        self.assertAlmostEqual(scui['expert_b']['fractional_top1_win_rate'],.45)
+        self.assertAlmostEqual(sum(r['fractional_top1_win_rate']
+                                   for r in scui.values()),1.)
+
     def test_ucui_cannot_change_thresholds(self):
         rows=fixture()
         initial=task_cue_thresholds(samples_from_rows(rows,'outer'))
