@@ -38,7 +38,7 @@ def feature(expert,source_tasks,hypothesis):
         np.outer(one,values).reshape(-1),
         np.outer(one,mask).reshape(-1)))
 
-def run_lopo(sample_rows,evidence_rows,manifest,hypotheses,source_tasks,
+def run_lopo(evidence_rows,manifest,hypotheses,source_tasks,
              alpha=10.,temperature=.5):
     if alpha<=0 or temperature<=0:raise ValueError('Positive fixed settings required')
     tasks=tuple(sorted(source_tasks))
