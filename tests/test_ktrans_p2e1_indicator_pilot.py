@@ -144,6 +144,29 @@ class IndicatorPilotTests(unittest.TestCase):
         self.assertTrue(all(x['model']=='Qwen/Qwen3-VL-32B-Instruct'
                             for x in outputs))
 
+    def test_batch_16_oom_backoff_keeps_jobs_in_order(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from scripts.run_ktrans_p2e1_indicator_pilot import run_batched_jobs
+        jobs=make_jobs(sample_source_rows(rows(),TASKS,1),TASKS,catalog(),
+                       'Qwen/Qwen3-VL-32B-Instruct',262144)
+        out=[];sizes=[]
+        a=SimpleNamespace(batch_size=16,max_new_tokens=1536,source_tasks=TASKS)
+        def fake_infer(model,processor,chunk,max_new_tokens):
+            sizes.append(len(chunk))
+            if len(chunk)>4:
+                raise RuntimeError('HIP out of memory')
+            return [json.dumps(fake(j['task'],j['image_path'] is not None))
+                    for j in chunk]
+        with patch('scripts.run_ktrans_p2e1_indicator_pilot.infer_batch',
+                   side_effect=fake_infer):
+            run_batched_jobs(None,None,jobs,a,out.append)
+        self.assertEqual([j['key'] for j in out],[j['key'] for j in jobs])
+        self.assertTrue(all(r['parsed'] is not None for r in out))
+        self.assertTrue(any(n>4 for n in sizes))
+        self.assertTrue(any(n<=4 for n in sizes))
+        self.assertTrue(all(r['actual_batch_size']<=4 for r in out))
+
     def test_strict_json_parse_and_unknown_capability(self):
         task=TASKS[0]
         self.assertIsNotNone(parse(json.dumps(fake(task,False)),TASKS,task,False))
