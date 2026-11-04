@@ -13,6 +13,8 @@ from scripts.run_ktrans_k7_vlm_pilot import MODEL
 from scripts.run_ktrans_k7b_controls import (
     SYSTEM,TEXT_ONLY_SYSTEM,VERSION,build_prompt,load_cached,parse)
 from urban_transfer.task_profiles import task_texts
+from urban_transfer.ktrans_k7d_image_only import (
+    IMAGE_ONLY_VERSION,IMAGE_ONLY_SYSTEM,IMAGE_ONLY_PROMPT,parse_image_only)
 
 def unique_jobs(manifest,model,max_pixels):
     texts=task_texts('structured')
@@ -28,11 +30,13 @@ def unique_jobs(manifest,model,max_pixels):
         image_task[(tile,row['task'])]=True
     jobs=[]
     def add(tile,task,condition,path):
-        prompt=build_prompt(task,condition,texts)
-        identity={'version':VERSION,'tile_id':tile,'task':task,'condition':condition,
+        prompt=(IMAGE_ONLY_PROMPT if condition=='image_only' else
+                build_prompt(task,condition,texts))
+        version=IMAGE_ONLY_VERSION if condition=='image_only' else VERSION
+        identity={'version':version,'tile_id':tile,'task':task,'condition':condition,
                   'model':model,'prompt':prompt,'max_pixels':max_pixels}
         key=hashlib.sha256(json.dumps(identity,sort_keys=True).encode()).hexdigest()
-        jobs.append({'key':key,'tile_id':tile,'task':task,'condition':condition,
+        jobs.append({'key':key,'version':version,'tile_id':tile,'task':task,'condition':condition,
                      'image_path':path,'prompt':prompt,
                      'model':model,'max_pixels':max_pixels})
     for tile,path in sorted(tile_map.items()):
@@ -57,7 +61,8 @@ def get_pending(jobs,records):
     return [j for j in jobs if not (j['key'] in records and records[j['key']].get('parsed') is not None)]
 
 def messages_for(job):
-    system=TEXT_ONLY_SYSTEM if job['condition']=='text_only' else SYSTEM
+    system=(IMAGE_ONLY_SYSTEM if job['condition']=='image_only' else
+            TEXT_ONLY_SYSTEM if job['condition']=='text_only' else SYSTEM)
     content=[]
     if job['image_path'] is not None:
         with Image.open(job['image_path']) as img:
@@ -88,6 +93,8 @@ def main():
     p.add_argument('--max-new-tokens',type=int,default=440)
     p.add_argument('--batch-size',type=int,default=4)
     p.add_argument('--dry-run',action='store_true',help='Print VLM cache coverage without loading the 8B model')
+    p.add_argument('--conditions',default='image_only,image_task,text_only',
+                   help='Comma-separated subset of cache conditions')
     p.add_argument('--max-new-jobs',type=int,default=0,
                    help='0=all outstanding; positive limit for incremental smoke tests')
     args=p.parse_args()
@@ -95,7 +102,11 @@ def main():
         p.error('Invalid inference settings')
     manifest=json.loads(args.manifest.read_text())
     if manifest.get('version')!='k7d-manifest-v1':p.error('Unsupported manifest')
-    jobs=unique_jobs(manifest,args.model,args.max_pixels)
+    conditions=set(x.strip() for x in args.conditions.split(',') if x.strip())
+    if not conditions or not conditions.issubset({'image_only','image_task','text_only'}):
+        p.error('Unknown cache condition')
+    jobs=[j for j in unique_jobs(manifest,args.model,args.max_pixels)
+          if j['condition'] in conditions]
     sources=[args.reuse_cache,args.output] if args.reuse_cache!=args.output else [args.output]
     records=merge_records(sources)
     pending=get_pending(jobs,records)
@@ -113,7 +124,7 @@ def main():
     model=Qwen3VLForConditionalGeneration.from_pretrained(args.model,dtype=torch.bfloat16,
           device_map='auto',attn_implementation='sdpa',low_cpu_mem_usage=True).eval()
     args.output.parent.mkdir(parents=True,exist_ok=True)
-    done=0;size=args.batch_size;begin=time.monotonic()
+    done=0;size=args.batch_size;begin=time.monotonic();previous=time.monotonic()
     # Do not mix no-image messages and image-bearing messages in one
     # multimodal processor call; some versions require homogeneous inputs.
     pending=sorted(pending,key=lambda x:(x['condition']=='text_only',x['key']))
@@ -135,15 +146,20 @@ def main():
             continue
         with args.output.open('a') as f:
             for job,raw in zip(group,raws):
-                record={**job,'version':VERSION,
-                    'system_prompt':TEXT_ONLY_SYSTEM if job['condition']=='text_only' else SYSTEM,
-                    'raw':raw,'parsed':parse(raw,job['condition'])}
+                mode=job['condition']
+                system=(IMAGE_ONLY_SYSTEM if mode=='image_only' else
+                        TEXT_ONLY_SYSTEM if mode=='text_only' else SYSTEM)
+                parsed=(parse_image_only(raw) if mode=='image_only' else parse(raw,mode))
+                record={**job,'system_prompt':system,'raw':raw,'parsed':parsed}
                 f.write(json.dumps(record,ensure_ascii=False)+'\n')
                 done+=1
                 print(f'[k7d-cache] {done}/{len(pending)} {job["condition"]} '
                       f'{job["task"]} json={"OK" if record["parsed"] else "INVALID"}',flush=True)
             f.flush();os.fsync(f.fileno())
-        print(f'[k7d-cache] batch={len(group)} elapsed_s={time.monotonic()-begin:.1f}',flush=True)
+        now=time.monotonic()
+        print(f'[k7d-cache] batch={len(group)} batch_s={now-previous:.1f} '
+              f'total_elapsed_s={now-begin:.1f} rate={len(group)/max(now-previous,1e-6):.3f}/s',flush=True)
+        previous=now
     print('[k7d-cache] saved',args.output,flush=True)
 
 if __name__=='__main__':main()
