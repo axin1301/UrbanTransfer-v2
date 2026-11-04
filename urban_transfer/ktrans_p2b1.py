@@ -67,7 +67,9 @@ def sample_features(sample,expert,source_tasks,task_text,variant):
     # when a different pseudo task is held out in each inner fold.
     one=np.zeros(len(source_tasks))
     one[source_tasks.index(expert)]=1.
-    pieces=[np.array([1.]),one,np.outer(one,relevant).reshape(-1)]
+    pieces=[np.array([1.]),one]
+    if variant in ('task_expert','task_cue_expert','permuted_task_cue_expert'):
+        pieces.append(np.outer(one,relevant).reshape(-1))
     if variant!='task_expert':
         pieces.extend([np.outer(one,scene).reshape(-1),
                        np.outer(one,mask).reshape(-1)])
