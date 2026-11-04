@@ -7,7 +7,7 @@ Only modify the image pixels:
 No label columns, pseudo-labels, gradients or checkpoint updates.
 The original image-task baseline is read from K7-B, never re-generated.
 """
-import argparse,hashlib,json,os,sys
+import argparse,hashlib,json,os,sys,time
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import numpy as np
@@ -84,6 +84,39 @@ def original_index(cache,tiles,tasks,model,max_pixels):
     if missing:raise ValueError('Missing exact matched K7-B image_task baselines: '+str(missing[:5]))
     return records
 
+def prepare_batch(jobs):
+    conversations=[]
+    for _,tile,_,condition,sentence in jobs:
+        with Image.open(tile['image_path']) as image:
+            altered=transform_image(image,condition,tile['tile_id'])
+            conversations.append([
+              {'role':'system','content':[{'type':'text','text':SYSTEM}]},
+              {'role':'user','content':[{'type':'image','image':altered},
+                                        {'type':'text','text':sentence}]}])
+    return conversations
+
+def decode_batch(processor,generated,input_ids):
+    width=input_ids.shape[1]
+    if generated.shape[0]!=input_ids.shape[0]:
+        raise ValueError('Incorrect generation batch dimension')
+    return [x.strip() for x in processor.batch_decode(
+        generated[:,width:],skip_special_tokens=True)]
+
+def run_batch(model,processor,jobs,max_new_tokens):
+    inputs=processor.apply_chat_template(
+        prepare_batch(jobs),tokenize=True,add_generation_prompt=True,
+        padding=True,return_dict=True,return_tensors='pt').to(model.device)
+    with torch.inference_mode():
+        generated=model.generate(**inputs,max_new_tokens=max_new_tokens,
+                                 do_sample=False)
+    return decode_batch(processor,generated,inputs['input_ids'])
+
+def is_oom(error):
+    message=str(error).lower()
+    return isinstance(error,torch.OutOfMemoryError) or (
+        isinstance(error,RuntimeError) and
+        ('out of memory' in message or 'memory allocation' in message))
+
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--manifest',type=Path,default=Path('runs/k7_pilot/vlm_evidence.jsonl'))
@@ -95,6 +128,7 @@ def main():
     p.add_argument('--model',default=MODEL)
     p.add_argument('--max-pixels',type=int,default=512*512)
     p.add_argument('--max-new-tokens',type=int,default=440)
+    p.add_argument('--batch-size',type=int,default=4)
     args=p.parse_args()
     tasks=tuple(dict.fromkeys(t.strip() for t in args.tasks.split(',') if t.strip()))
     conditions=tuple(dict.fromkeys(t.strip() for t in args.conditions.split(',') if t.strip()))
@@ -102,7 +136,7 @@ def main():
         p.error('Select one or more source pilot tasks')
     if not conditions or not set(conditions).issubset(CONDITIONS):
         p.error('Unknown interventions')
-    if args.max_tiles<1 or args.max_pixels<224*224 or args.max_new_tokens<64:
+    if args.batch_size<1 or args.max_tiles<1 or args.max_pixels<224*224 or args.max_new_tokens<64:
         p.error('Invalid limits')
     tiles=read_tile_manifest(args.manifest,args.max_tiles)
     baselines=original_index(args.original,tiles,tasks,args.model,args.max_pixels)
