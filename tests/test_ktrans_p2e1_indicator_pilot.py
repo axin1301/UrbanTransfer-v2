@@ -104,11 +104,11 @@ class IndicatorPilotTests(unittest.TestCase):
         from urban_transfer.ktrans_p2e1_pilot import parse_json_object
         task=TASKS[0]
         answer=json.dumps(fake(task,False))
-        self.assertIsNotNone(parse('```json\\n'+answer+'\\n```',
+        self.assertIsNotNone(parse('```json\n'+answer+'\n```',
                                    TASKS,task,False))
-        self.assertIsNotNone(parse('Generated JSON:\\n'+answer,
+        self.assertIsNotNone(parse('Generated JSON:\n'+answer,
                                    TASKS,task,False))
-        self.assertIsNone(parse(answer+'\\n'+answer,TASKS,task,False))
+        self.assertIsNone(parse(answer+'\n'+answer,TASKS,task,False))
         self.assertIsNone(parse('{"experts":',TASKS,task,False))
         self.assertIsNone(parse_json_object(None))
         malformed=fake(task,False)
@@ -122,8 +122,7 @@ class IndicatorPilotTests(unittest.TestCase):
         spec=catalog()
         jobs=make_jobs(sample_source_rows(rows(),TASKS,1),TASKS,spec,
                        'Qwen/Qwen3-VL-32B-Instruct',262144)
-        # 10 text-only + 10? actually five source tasks * two image
-        # arms * two splits = 20 image requests.
+        # 10 text-only and 20 image requests for this two-split test.
         outputs=[]
         calls=[]
         a=SimpleNamespace(batch_size=8,max_new_tokens=1536,source_tasks=TASKS)
