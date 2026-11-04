@@ -83,7 +83,7 @@ def fold_parameter_audit(checkpoints,sources,outer_target,nested_csv):
             rows.append({'pseudo_a':first,'pseudo_b':second,
                          'named_expert':expert,
                          **compare_vectors(tensors_for_expert(left,expert),
-                                           tensors_for_expert(right))})
+                                           tensors_for_expert(right,expert))})
     return list(metadata.values()),rows,shared
 
 def training_data_audit(folds,nested_csv,sources,outer_target):

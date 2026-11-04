@@ -92,6 +92,17 @@ class P2CSharingTests(unittest.TestCase):
             self.assertEqual(len(folds),5)
             self.assertEqual(len(pairs),30)
             self.assertEqual(len(shared),10)
+            # Named expert "b" moves from local index 0 in fold "a"
+            # to local index 1 in fold "c". Compare by name, not index.
+            from urban_transfer.ktrans_p2c2 import compare_vectors
+            actual=next(row for row in pairs if
+                        row['pseudo_a']=='a' and row['pseudo_b']=='c'
+                        and row['named_expert']=='b')
+            expected=compare_vectors(tensors_for_expert(c['a'],'b'),
+                                     tensors_for_expert(c['c'],'b'))
+            self.assertEqual(actual['n_parameters'],expected['n_parameters'])
+            self.assertAlmostEqual(actual['relative_l2_parameter_shift'],
+                                   expected['relative_l2_parameter_shift'])
             # The named expert is indexed by its local fold-specific
             # position, not by a supposedly global expert.0 head.
             p=tensors_for_expert(c['a'],'b')
