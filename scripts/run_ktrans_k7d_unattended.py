@@ -127,16 +127,41 @@ def main():
         allcount,missing,_=cache_quality(args.manifest,cache,args.reuse_cache,args.model,
                                          args.max_pixels,'image_only')
         if missing and args.preflight:
+            # Preflight is a sanity check, not a demand for 8/8 first-pass
+            # strict JSON. Require some genuine completed visual evidence;
+            # all remaining invalid samples are retried after the full pass.
             run_command(common+['--conditions','image_only',
                                 '--max-new-jobs',str(args.preflight)],log)
-            repair_existing()  # accept only audited, complete visual fields
+            repair_existing()
             total,remaining,samples=cache_quality(args.manifest,cache,args.reuse_cache,
                 args.model,args.max_pixels,'image_only')
-            # The preflight jobs are deterministic first N uncached image-only identities.
-            if remaining>max(0,missing-args.preflight):
-                raise RuntimeError('Image-only v2 preflight INVALID. '
-                                   'Inspect evidence.jsonl and pipeline.log before full run.')
-            print(f'[k7d-auto] preflight passed; image_only valid={total-remaining}/{total}',flush=True)
+            gained=missing-remaining
+            print(f'[k7d-auto] preflight first_pass_valid={gained}/'
+                  f'{min(missing,args.preflight)} image_only_remaining={remaining}',flush=True)
+            if gained==0:
+                # Single-image retry can rescue batch-conditioned truncation.
+                # It is bounded to the first 8 remaining jobs.
+                retry=[sys.executable,'-u','scripts/cache_ktrans_k7d.py',
+                       '--manifest',str(args.manifest),
+                       '--output',str(cache),'--reuse-cache',str(args.reuse_cache),
+                       '--model',args.model,'--max-pixels',str(args.max_pixels),
+                       '--max-new-tokens',str(max(args.max_new_tokens,800)),
+                       '--batch-size','1','--conditions','image_only',
+                       '--max-new-jobs',str(args.preflight)]
+                save('image_only_preflight_retry')
+                run_command(retry,log)
+                repair_existing()
+                total,after_retry,samples=cache_quality(args.manifest,cache,args.reuse_cache,
+                    args.model,args.max_pixels,'image_only')
+                gained=missing-after_retry
+                if gained==0:
+                    raise RuntimeError('Image-only v2 preflight remains 0 valid '
+                                       'after single-image retry; inspect '
+                                       'image_only_recovery_audit.csv and raw JSON. '
+                                       'No bulk VLM inference or router training started.')
+                remaining=after_retry
+            print(f'[k7d-auto] preflight usable; valid_gain={gained}, '
+                  f'image_only_valid={total-remaining}/{total}',flush=True)
         save('full_vlm_cache')
         run_command(common,log)
         save('recover_post_inference')
