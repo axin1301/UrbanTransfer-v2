@@ -11,9 +11,10 @@ import hashlib
 from collections import defaultdict
 import numpy as np
 
-def model_hash(coef,task):
+def model_hash(coef,task,mu,sigma):
     a=np.asarray(coef,dtype='<f8')
-    return hashlib.sha256(task.encode()+a.tobytes()).hexdigest()
+    moments=np.asarray([mu,sigma],dtype='<f8')
+    return hashlib.sha256(task.encode()+a.tobytes()+moments.tobytes()).hexdigest()
 
 def prepare_records(samples):
     """Expect list of dicts {task,city,image_path,x,y}; no outer target."""
@@ -59,7 +60,7 @@ def fit_bank(samples,source_tasks,heldout_cities,alpha=10.):
         # Ordinary positive-penalty ridge, with unregularized intercept.
         coef=np.linalg.solve(design.T@design+alpha*regularizer,design.T@z)
         bank[task]={'coef':coef,'mu':mu,'sigma':sigma,
-                    'hash':model_hash(coef,task),
+                    'hash':model_hash(coef,task,mu,sigma),
                     'n_train':len(train),
                     'n_common_unseen':len(test),
                     'train_cities':sorted({s['city'] for s in train})}
@@ -132,3 +133,34 @@ def bank_report(bank):
              'n_train_cities':len(entry['train_cities']),
              'model_hash':entry['hash'],'source_train_mu':entry['mu'],
              'source_train_std':entry['sigma']} for name,entry in sorted(bank.items())]
+
+def save_bank(path,bank):
+    """Persist numeric coefficients and source-train moments, no pickle."""
+    tasks=sorted(bank)
+    if not tasks:raise ValueError('Empty frozen bank')
+    import pathlib
+    path=pathlib.Path(path)
+    contents={'source_tasks':np.asarray(tasks,dtype='U128')}
+    for j,task in enumerate(tasks):
+        item=bank[task]
+        contents[f'coef_{j}']=np.asarray(item['coef'],dtype=np.float64)
+        contents[f'moments_{j}']=np.asarray([item['mu'],item['sigma']],dtype=np.float64)
+        contents[f'hash_{j}']=np.asarray(item['hash'],dtype='U64')
+    np.savez_compressed(path,**contents)
+
+def load_bank(path):
+    """Reload a stable model with full-identity hash verification."""
+    with np.load(path,allow_pickle=False) as z:
+        tasks=[str(s) for s in z['source_tasks']]
+        if len(tasks)!=len(set(tasks)):raise ValueError('Duplicated model names')
+        bank={}
+        for j,task in enumerate(tasks):
+            coef=np.asarray(z[f'coef_{j}'],dtype=float)
+            mu,sigma=map(float,z[f'moments_{j}'])
+            digest=str(z[f'hash_{j}'])
+            if coef.ndim!=1 or coef.size<2 or not np.isfinite(coef).all() or sigma<=0:
+                raise ValueError('Invalid frozen model state')
+            if digest!=model_hash(coef,task,mu,sigma):
+                raise ValueError('Frozen expert state hash mismatch')
+            bank[task]={'coef':coef,'mu':mu,'sigma':sigma,'hash':digest}
+    return bank
