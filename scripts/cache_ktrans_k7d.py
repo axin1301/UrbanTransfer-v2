@@ -93,6 +93,8 @@ def main():
     p.add_argument('--max-new-tokens',type=int,default=440)
     p.add_argument('--batch-size',type=int,default=4)
     p.add_argument('--dry-run',action='store_true',help='Print VLM cache coverage without loading the 8B model')
+    p.add_argument('--conditions',default='image_only,image_task,text_only',
+                   help='Comma-separated subset of cache conditions')
     p.add_argument('--max-new-jobs',type=int,default=0,
                    help='0=all outstanding; positive limit for incremental smoke tests')
     args=p.parse_args()
@@ -100,7 +102,11 @@ def main():
         p.error('Invalid inference settings')
     manifest=json.loads(args.manifest.read_text())
     if manifest.get('version')!='k7d-manifest-v1':p.error('Unsupported manifest')
-    jobs=unique_jobs(manifest,args.model,args.max_pixels)
+    conditions=set(x.strip() for x in args.conditions.split(',') if x.strip())
+    if not conditions or not conditions.issubset({'image_only','image_task','text_only'}):
+        p.error('Unknown cache condition')
+    jobs=[j for j in unique_jobs(manifest,args.model,args.max_pixels)
+          if j['condition'] in conditions]
     sources=[args.reuse_cache,args.output] if args.reuse_cache!=args.output else [args.output]
     records=merge_records(sources)
     pending=get_pending(jobs,records)
