@@ -51,10 +51,19 @@ def merge_records(paths):
     """Latest successful record wins; a later failure must not hide success."""
     records={}
     for path in paths:
-        for row in load_cached(path).values():
-            k=row['key']
-            if row.get('parsed') is not None or k not in records:
-                records[k]=row
+        if not Path(path).is_file():continue
+        with Path(path).open() as stream:
+            for line in stream:
+                if not line.strip():continue
+                try:row=json.loads(line)
+                except json.JSONDecodeError:continue  # interrupted final append
+                if not isinstance(row,dict) or not isinstance(row.get('key'),str):
+                    continue
+                k=row['key']
+                # Always favor the latest successful record, even if a
+                # subsequent aborted attempt appended INVALID for that key.
+                if row.get('parsed') is not None or k not in records:
+                    records[k]=row
     return records
 
 def get_pending(jobs,records):

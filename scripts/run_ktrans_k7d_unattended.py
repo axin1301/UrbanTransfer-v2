@@ -113,13 +113,23 @@ def main():
         state.update(stage=stage,status=status_value)
         if error:state['error']=error
         status.write_text(json.dumps(state,indent=2))
+    def repair_existing():
+        cmd=[sys.executable,'-u','scripts/repair_ktrans_k7d_image_only.py',
+             '--manifest',str(args.manifest),'--cache',str(cache),
+             '--reuse-cache',str(args.reuse_cache),
+             '--model',args.model,'--max-pixels',str(args.max_pixels)]
+        run_command(cmd,log)
+
     try:
+        save('recover_existing_image_only_v2')
+        repair_existing()
         save('image_only_preflight')
         allcount,missing,_=cache_quality(args.manifest,cache,args.reuse_cache,args.model,
                                          args.max_pixels,'image_only')
         if missing and args.preflight:
             run_command(common+['--conditions','image_only',
                                 '--max-new-jobs',str(args.preflight)],log)
+            repair_existing()  # accept only audited, complete visual fields
             total,remaining,samples=cache_quality(args.manifest,cache,args.reuse_cache,
                 args.model,args.max_pixels,'image_only')
             # The preflight jobs are deterministic first N uncached image-only identities.
@@ -129,10 +139,31 @@ def main():
             print(f'[k7d-auto] preflight passed; image_only valid={total-remaining}/{total}',flush=True)
         save('full_vlm_cache')
         run_command(common,log)
+        save('recover_post_inference')
+        repair_existing()
         total,missing,samples=cache_quality(args.manifest,cache,args.reuse_cache,
                                             args.model,args.max_pixels)
+        if missing:
+            # A second pass is deliberately restricted to outstanding
+            # Image-Only records. Bigger output allowance helps for truncated
+            # responses; batch=1 avoids padding-/batch-related instability.
+            _,image_only_missing,_=cache_quality(args.manifest,cache,args.reuse_cache,
+                args.model,args.max_pixels,'image_only')
+            if image_only_missing:
+                save('retry_image_only_individual')
+                retry=[sys.executable,'-u','scripts/cache_ktrans_k7d.py',
+                       '--manifest',str(args.manifest),
+                       '--output',str(cache),'--reuse-cache',str(args.reuse_cache),
+                       '--model',args.model,'--max-pixels',str(args.max_pixels),
+                       '--max-new-tokens',str(max(args.max_new_tokens,800)),
+                       '--batch-size','1','--conditions','image_only']
+                run_command(retry,log)
+                repair_existing()
+            total,missing,samples=cache_quality(args.manifest,cache,args.reuse_cache,
+                                                args.model,args.max_pixels)
         if missing:raise RuntimeError(f'Incomplete VLM cache {total-missing}/{total}; '
-                                      f'examples={samples}; no training started')
+                                      f'examples={samples}; no training started. '
+                                      f'Inspect image_only_recovery_audit.csv.')
         print(f'[k7d-auto] cache coverage {total}/{total} complete',flush=True)
         output_paths=[]
         for seed in seeds:
