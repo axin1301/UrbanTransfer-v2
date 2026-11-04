@@ -2,7 +2,8 @@ import unittest
 import numpy as np
 from urban_transfer.ktrans_p2b1 import aligned_samples
 from urban_transfer.ktrans_p2c2b_stable_bank import (
-    prepare_records,fit_bank,predict_bank_row,export_stable_evidence,bank_report)
+    prepare_records,fit_bank,predict_bank_row,export_stable_evidence,bank_report,
+    save_bank,load_bank)
 
 TASKS=('a','b','c','d','e')
 
@@ -88,6 +89,27 @@ class StableBankTests(unittest.TestCase):
         wrong[0]['label_log1p']+=5.
         with self.assertRaises(ValueError):
             export_stable_evidence(wrong,source,bank,TASKS,{'unseen1'})
+
+    def test_persisted_bank_roundtrip_and_hash_includes_source_moments(self):
+        import tempfile
+        from pathlib import Path
+        source,_=evidence_fixture()
+        bank=fit_bank(source,TASKS,{'unseen1'})
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'bank.npz'
+            save_bank(path,bank)
+            loaded=load_bank(path)
+            for task in TASKS:
+                np.testing.assert_array_equal(
+                    bank[task]['coef'],loaded[task]['coef'])
+                self.assertEqual(bank[task]['hash'],loaded[task]['hash'])
+            changed=[dict(x) for x in source]
+            for row in changed:
+                if row['task']=='a':row['y']+=3.
+            retrained=fit_bank(changed,TASKS,{'unseen1'})
+            # Centered expert weights can be invariant to label offset,
+            # but the full source expert state (moments) must change.
+            self.assertNotEqual(bank['a']['hash'],retrained['a']['hash'])
 
     def test_duplicate_training_or_missing_source_task_rejected(self):
         source,_=evidence_fixture()
