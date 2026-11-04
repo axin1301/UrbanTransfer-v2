@@ -117,9 +117,38 @@ def make_jobs(sampled,source_tasks,spec,model,max_pixels):
         raise ValueError('Duplicate VLM prompt keys')
     return jobs
 
+def parse_json_object(raw):
+    """Allow fenced/leading explanatory text, but never repair bad scores.
+
+    Decode the first COMPLETE JSON object (with proper string escapes);
+    reject trailing extra JSON objects rather than guessing which to use.
+    The original output remains persisted for scientific audit.
+    """
+    if not isinstance(raw,str):return None
+    text=raw.strip()
+    if text.startswith('```'):
+        first=text.find('\n')
+        if first>=0:
+            text=text[first+1:]
+        text=text.strip()
+        if text.endswith('```'):text=text[:-3].strip()
+    decoder=json.JSONDecoder()
+    try:
+        obj,offset=decoder.raw_decode(text)
+        if text[offset:].strip():return None
+        return obj
+    except json.JSONDecodeError:
+        start=text.find('{')
+        if start<0:return None
+        try:obj,offset=decoder.raw_decode(text[start:])
+        except json.JSONDecodeError:return None
+        if text[start+offset:].strip() not in ('','```'):
+            return None
+        return obj
+
+
 def parse(raw,source_tasks,task,has_image):
-    try:obj=json.loads(raw)
-    except (json.JSONDecodeError,TypeError):return None
+    obj=parse_json_object(raw)
     if not isinstance(obj,dict) or not isinstance(obj.get('experts'),dict):
         return None
     expected=set(source_tasks)-{task}

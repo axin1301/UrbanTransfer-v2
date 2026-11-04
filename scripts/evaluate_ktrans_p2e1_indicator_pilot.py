@@ -16,7 +16,7 @@ def write_csv(p,rows):
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--pilot',type=Path,default=Path('runs/ktrans_competence/p2e1_indicator_relation_source_dev'))
+    p.add_argument('--pilot',type=Path,default=Path('runs/ktrans_competence/p2e1_qwen3vl32b_source_dev'))
     p.add_argument('--input',type=Path,default=Path('runs/ktrans_competence/education_all_outer_train_dev'))
     p.add_argument('--knowledge-cache',type=Path,default=Path('runs/ktrans_competence/full_source_evidence.jsonl'))
     p.add_argument('--reuse-cache',type=Path,default=Path('runs/k7b_pilot/evidence.jsonl'))
