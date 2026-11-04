@@ -84,6 +84,27 @@ class P2B2Tests(unittest.TestCase):
         self.assertTrue(all(r['scui_fixed_best_expert'] in TASKS for r in detail))
         self.assertTrue(all(np.isfinite(r['mean_error_product']) for r in pairs))
 
+    def test_csv_preserves_heterogeneous_route_provenance(self):
+        import csv
+        import tempfile
+        from pathlib import Path
+        from scripts.diagnose_ktrans_p2b2_failures import write_csv
+        rows=[
+            {'route':'same_task_scui_to_ucui','tile_id':'a','soft_mix_squared_error':1.},
+            {'route':'other_tasks_scui_to_ucui','tile_id':'b',
+             'soft_mix_squared_error':2.,'heldout_source_task':'task_a'},
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'test.csv'
+            write_csv(path,rows)
+            with path.open(newline='') as f:
+                restored=list(csv.DictReader(f))
+        self.assertEqual(len(restored),2)
+        self.assertIn('heldout_source_task',restored[0])
+        self.assertEqual(restored[0]['heldout_source_task'],'')
+        self.assertEqual(restored[1]['heldout_source_task'],'task_a')
+        self.assertEqual(restored[1]['soft_mix_squared_error'],'2.0')
+
     def test_strict_same_ucui_comparison_identity(self):
         s=fixture()
         same=same_task_predictions(s,TASKS,texts())

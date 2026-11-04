@@ -14,8 +14,13 @@ from urban_transfer.ktrans_p2b2 import (
 
 def write_csv(path,rows):
     if not rows:raise ValueError('No rows for '+str(path))
+    # Two diagnostic routes have different provenance fields: source-LOTO
+    # includes heldout_source_task, same-task supervision does not.
+    # Preserve the union in stable first-appearance order; DictWriter
+    # writes missing values as blanks instead of dropping provenance.
+    fields=list(dict.fromkeys(key for row in rows for key in row))
     with path.open('w',newline='') as f:
-        w=csv.DictWriter(f,fieldnames=list(rows[0]))
+        w=csv.DictWriter(f,fieldnames=fields)
         w.writeheader();w.writerows(rows)
 
 def main():
