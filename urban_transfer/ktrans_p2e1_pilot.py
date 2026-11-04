@@ -68,8 +68,7 @@ def relation_permutation(task,sources,spec):
     relations=[card['relation_to_target'] for card in cards]
     if len(cards)<2:raise ValueError('Need multiple experts')
     for j,card in enumerate(cards):
-        card['relation_to_target']={**relations[(j+1)%len(cards)],
-             'control_note':'Shuffled across candidate experts: INVALID relation control'}
+        card['relation_to_target']=dict(relations[(j+1)%len(cards)])
     return cards
 
 def prompt(task,source_tasks,spec,arm):
@@ -85,8 +84,7 @@ def prompt(task,source_tasks,spec,arm):
              'task_relation_role':'Relation edges are conceptual HYPOTHESES, not measured accuracy.' if relation else
                                   'No indicator relationship hypotheses supplied.'}
     has_image=arm.endswith('_region')
-    return ('Experimental arm: '+arm+'\n'
-       +'Image available: '+str(has_image)+'. '
+    return ('Image available: '+str(has_image)+'. '
        +('Analyze ONLY visible morphology and adjust source expert transfer hypotheses to this specific region. '
          if has_image else 'NO IMAGE is provided. Evaluate only global target/source measurement compatibility. '
          'Set region_support=null for EVERY expert. ')
