@@ -59,6 +59,16 @@ class P2B1Tests(unittest.TestCase):
             self.assertEqual(len(values),60)
             self.assertEqual(sizes,[2]*30)
 
+    def test_cue_only_ablation_does_not_read_text_descriptor(self):
+        s=aligned_samples(fixture(),'outer',TASKS)[0]
+        first=sample_features(s,s['experts'][0],TASKS,texts(),'cue_expert')
+        altered={k:[1.-v for v in values] for k,values in texts().items()}
+        second=sample_features(s,s['experts'][0],TASKS,altered,'cue_expert')
+        np.testing.assert_array_equal(first,second)
+        full=sample_features(s,s['experts'][0],TASKS,texts(),'task_cue_expert')
+        other=sample_features(s,s['experts'][0],TASKS,altered,'task_cue_expert')
+        self.assertFalse(np.array_equal(full,other))
+
     def test_soft_mixture_and_pairwise_correct(self):
         samples=aligned_samples(fixture(),'outer',TASKS)[:1]
         # Perfect ranking: lower true loss gets a lower competence score.
