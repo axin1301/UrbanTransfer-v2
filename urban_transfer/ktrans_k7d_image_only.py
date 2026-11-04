@@ -42,6 +42,10 @@ def parse_image_only(raw):
     result={}
     for field in ('visual_cues','evidence_confidence'):
         values=obj.get(field)
+        if field=='evidence_confidence' and field in obj and values is None:
+            # An entire null confidence dictionary means every cue is
+            # unassessable, NOT zero confidence and NOT a fabricated score.
+            values={cue:None for cue in CUES}
         if not isinstance(values,dict) or set(values)!=set(CUES):
             return None
         parsed={}
