@@ -101,7 +101,15 @@ Manifest validates train contains only five outer source tasks and
 excludes heldout cities. `meta_SCUI`, `meta_UCSI` and `meta_UCUI`
 are sampled deterministically without using target values.
 
-### 3. Smoke-test VLM cache (few new jobs)
+### 3. Inspect cache work estimate, then smoke-test VLM
+
+```bash
+python -u scripts/cache_ktrans_k7d.py \\
+  --manifest runs/k7d_education/manifest.json \\
+  --output runs/k7d_education/evidence.jsonl \\
+  --reuse-cache runs/k7b_pilot/evidence.jsonl \\
+  --dry-run
+```
 
 ```bash
 python -u scripts/cache_ktrans_k7d.py \
