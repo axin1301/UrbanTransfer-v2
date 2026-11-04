@@ -24,6 +24,14 @@ SYSTEM=(
     'A cue may be a plausible indirect proxy even when the target value is unknowable. '
     'Return a JSON object only, never markdown.'
 )
+TEXT_ONLY_SYSTEM=(
+    'You are an urban indicator methodology analyst working WITHOUT any image. '
+    'Assess the conceptual usefulness of hypothetical urban morphology cues '
+    'as indirect proxies for the indicator. This is NOT an evaluation of '
+    'whether cues are present in any location, nor a prediction of indicator '
+    'values. Never claim to observe an image. Return valid JSON only.'
+)
+TEXT_ONLY_PROTOCOL='k7b-text-conceptual-v2'
 SCORING=(
     'The six cue names are: '+', '.join(CUES)+'. '
     'Return a JSON object with fields: "scene" (one sentence), "visual_cues", '
@@ -52,7 +60,21 @@ def build_prompt(task,mode,descriptions):
         prefix='Indicator definition (NOT an observed value): '+descriptions[task]+\
             '\nEvaluate whether each cue could be an INDIRECT spatial proxy for this task. '
         if mode=='text_only':
-            prefix+='There is NO image. You must not infer the presence of any scene feature. '
+            prefix+=(
+                'TEXT-ONLY CONCEPTUAL PRIOR '+TEXT_ONLY_PROTOCOL+'. '
+                'There is NO image and NO specific region. For EACH cue, answer '
+                'the hypothetical question: IF this cue were visible in some '
+                'urban region, how plausibly could it serve as an INDIRECT '
+                'spatial proxy for the indicator? Give an ordinal 0-3 '
+                'conceptual evidence_relevance score even though the cue is '
+                'not observed. This is a general theoretical association '
+                'rating, NOT an empirical correlation or a claim about '
+                'any region. Do NOT return null merely because the image '
+                'is absent; null is reserved for a genuinely undefined '
+                'conceptual association. Set every visual_cues and '
+                'evidence_confidence entry to null, and explicitly acknowledge '
+                'that no image is available in scene and limitations. '
+            )
     return prefix+'\n'+SCORING
 
 def parse(raw,mode):
@@ -172,17 +194,18 @@ def main():
            attn_implementation='sdpa',low_cpu_mem_usage=True).eval()
     args.output.parent.mkdir(parents=True,exist_ok=True)
     for k,(key,tile,task,mode,sentence) in enumerate(remaining,1):
+        system_prompt=TEXT_ONLY_SYSTEM if mode=='text_only' else SYSTEM
         content=[]
         if tile is not None:
             with Image.open(tile['image_path']) as image:
                 content.append({'type':'image','image':image.convert('RGB')})
                 content.append({'type':'text','text':sentence})
-                messages=[{'role':'system','content':[{'type':'text','text':SYSTEM}]},
+                messages=[{'role':'system','content':[{'type':'text','text':system_prompt}]},
                           {'role':'user','content':content}]
                 inputs=processor.apply_chat_template(messages,tokenize=True,
                          add_generation_prompt=True,return_dict=True,return_tensors='pt').to(model.device)
         else:
-            messages=[{'role':'system','content':[{'type':'text','text':SYSTEM}]},
+            messages=[{'role':'system','content':[{'type':'text','text':system_prompt}]},
                       {'role':'user','content':[{'type':'text','text':sentence}]}]
             inputs=processor.apply_chat_template(messages,tokenize=True,
                      add_generation_prompt=True,return_dict=True,return_tensors='pt').to(model.device)
@@ -194,7 +217,9 @@ def main():
                 'city':tile['city'] if tile else None,
                 'image_name':tile['image_name'] if tile else None,
                 'task':task,'condition':mode,'model':args.model,'prompt':sentence,
-                'max_pixels':args.max_pixels,'raw':raw,'parsed':parse(raw,mode)}
+                'max_pixels':args.max_pixels,
+                'system_prompt':system_prompt,
+                'raw':raw,'parsed':parse(raw,mode)}
         with args.output.open('a') as f:
             f.write(json.dumps(result,ensure_ascii=False)+'\n')
             f.flush();os.fsync(f.fileno())
