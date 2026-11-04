@@ -25,7 +25,7 @@ def cache_records(path):
     return data
 
 def is_valid(job,row):
-    return bool(row and row.get('parsed') is not None and all(
+    return bool(row and isinstance(row.get('raw'),str) and all(
         row.get(k)==job[k] for k in
         ('version','arm','task','tile_id','model','max_pixels','prompt')))
 
@@ -176,7 +176,9 @@ def run(a):
     print(f'[p2e1] unverified_raw_units={unknown}/{len(spec)} '
           f'new_gpu_jobs={min(len(pending),a.max_new_jobs) if a.max_new_jobs else len(pending)}',flush=True)
     if a.dry_run:return
-    if pending:
+    if a.revalidate_only:
+        print(f'[p2e1] revalidate-only; skipping {len(pending)} pending jobs, no GPU inference',flush=True)
+    if pending and not a.revalidate_only:
         import torch
         if not torch.cuda.is_available():
             raise RuntimeError('P2-E1 new multimodal inference requires ROCm GPU; dry-run runs on CPU')
@@ -223,6 +225,8 @@ def main():
                    help='Start batch 8 or 16; auto-halves on GPU OOM')
     p.add_argument('--max-new-jobs',type=int,default=0)
     p.add_argument('--dry-run',action='store_true')
+    p.add_argument('--revalidate-only',action='store_true',
+                   help='Reparse saved raw responses without loading the VLM')
     a=p.parse_args()
     if a.tiles_per_task_split<1 or a.max_new_jobs<0 or a.max_new_tokens<128 or a.max_pixels<224*224:
         p.error('Invalid pilot budget')
