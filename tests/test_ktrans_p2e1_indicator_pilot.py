@@ -76,7 +76,8 @@ class IndicatorPilotTests(unittest.TestCase):
         self.assertNotIn('relation_to_target',prompt(TASKS[0],TASKS,spec,'definition_only'))
         self.assertIn('relation_to_target',prompt(TASKS[0],TASKS,spec,'definition_relation'))
         perm=relation_permutation(TASKS[0],TASKS,spec)
-        self.assertTrue(all('control_note' in row['relation_to_target'] for row in perm))
+        self.assertTrue(all('control_note' not in row['relation_to_target'] for row in perm))
+        self.assertNotIn('permuted_relation_region',prompt(TASKS[0],TASKS,spec,'permuted_relation_region'))
 
     def test_strict_json_parse_and_unknown_capability(self):
         task=TASKS[0]
