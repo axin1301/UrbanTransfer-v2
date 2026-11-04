@@ -25,7 +25,7 @@ class CoverageTests(unittest.TestCase):
         x=gradient((w*w).sum(),[w])
         y=gradient(-(w*w).sum(),[w])
         self.assertAlmostEqual(cosine(x,y),-1.)
-        self.assertAlmostEqual(cosine(x,torch.zeros_like(x)),float('nan')) if False else None
+        self.assertTrue(__import__('math').isnan(cosine(x,torch.zeros_like(x))))
 
     def test_zero_gradient_loss(self):
         w=torch.nn.Parameter(torch.tensor([1.,2.]))
