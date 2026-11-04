@@ -150,6 +150,8 @@ def eval_predictions(samples,predicted,temperature):
 def aggregate(items):
     """Equal weight to each tile within a SOURCE pseudo-task / split."""
     if not items:raise ValueError('No unit metrics')
+    soft_mse=float(np.mean([r['soft_mix_squared_error'] for r in items]))
+    uniform_mse=float(np.mean([r['uniform_mix_squared_error'] for r in items]))
     return {'n_tiles':len(items),'n_cities':len({r['city'] for r in items}),
         'top1_fractional_accuracy':float(np.mean([r['top1_fractional_correct'] for r in items])),
         'pairwise_accuracy':float(sum(r['pairwise_correct_sum'] for r in items)/
@@ -157,8 +159,8 @@ def aggregate(items):
         'mean_selected_regret':float(np.mean([r['selected_regret'] for r in items])),
         'selected_expert_mse':float(np.mean([r['selected_expert_squared_error'] for r in items])),
         'oracle_single_expert_mse':float(np.mean([r['oracle_min_squared_error'] for r in items])),
-        'soft_mix_mse':float(np.mean([r['soft_mix_squared_error'] for r in items])),
-        'uniform_mix_mse':float(np.mean([r['uniform_mix_squared_error'] for r in items]))}
+        'soft_mix_mse':soft_mse,'uniform_mix_mse':uniform_mse,
+        'soft_mix_mse_ratio_to_uniform':float(soft_mse/uniform_mse) if uniform_mse>1e-12 else float('nan')}
 
 def source_lopo(samples,source_tasks,task_text,alpha=10.,temperature=.5,seed=42):
     """Five honest SOURCE pseudo-task-heldout folds, SCUI fit only.
@@ -207,5 +209,6 @@ def summarize_source_lopo(rows):
             'macro_pairwise_accuracy':float(np.mean([t['pairwise_accuracy'] for t in task_stats])),
             'macro_selected_regret':float(np.mean([t['mean_selected_regret'] for t in task_stats])),
             'macro_soft_mix_mse':float(np.mean([t['soft_mix_mse'] for t in task_stats])),
-            'macro_uniform_mix_mse':float(np.mean([t['uniform_mix_mse'] for t in task_stats]))})
+            'macro_uniform_mix_mse':float(np.mean([t['uniform_mix_mse'] for t in task_stats])),
+            'macro_mse_ratio_to_uniform':float(np.nanmean([t['soft_mix_mse_ratio_to_uniform'] for t in task_stats]))})
     return task_rows,summaries
