@@ -127,7 +127,7 @@ def parse_json_object(raw):
     if not isinstance(raw,str):return None
     text=raw.strip()
     if text.startswith('```'):
-        first=text.find('\\n')
+        first=text.find('\n')
         if first>=0:
             text=text[first+1:]
         text=text.strip()
