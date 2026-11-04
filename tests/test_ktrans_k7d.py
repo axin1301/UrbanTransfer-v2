@@ -58,6 +58,20 @@ class K7DTransferTests(unittest.TestCase):
         self.assertLess(w[2,2].item(),1e-9)
         self.assertTrue((g<.5).all())
 
+    def test_router_gradient_is_source_only_and_nonzero(self):
+        torch.manual_seed(42)
+        net=AnchoredKnowledgeRouter(4)
+        features=torch.rand(8,36)
+        prior=torch.tensor([[0.,.2,.3,.5]]*8)
+        mask=torch.tensor([[True,False,False,False]]*8)
+        experts=torch.randn(8,4)
+        target=torch.randn(8)
+        w,g=net(features,prior,mask)
+        loss=((w*experts).sum(-1)-target).square().mean()+.01*g.square().mean()
+        loss.backward()
+        self.assertTrue(any(p.grad is not None and bool((p.grad.abs()>0).any())
+                            for p in net.parameters()))
+
     def test_missing_cache_fails_closed(self):
         manifest={'rows':[{'tile_id':'id','image_path':'/tmp/tile.png',
                  'task':'education_accessibility'}]}
