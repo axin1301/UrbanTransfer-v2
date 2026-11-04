@@ -59,9 +59,11 @@ def main():
     samples=aligned_samples(sampled,original['outer_target_excluded'],sources)
     base=source_lopo(samples,sources,descriptors,a.alpha,a.temperature,seed=plan['seed'])
     base_task,base_macro=summarize_source_lopo(base)
-    base_task=[{**row,'mode':row.pop('model')} for row in base_task
+    base_task=[{'mode':'task_expert',**{k:v for k,v in row.items()
+                       if k not in ('model','inner_partition')}}
+               for row in base_task
                if row['model']=='task_expert' and row['inner_partition']=='meta_UCUI']
-    base_macro=[{**row,'mode':row.pop('model')} for row in base_macro
+    base_macro=[row for row in base_macro
                 if row['model']=='task_expert' and row['inner_partition']=='meta_UCUI']
     if len(base_task)!=5 or len(base_macro)!=1:
         raise ValueError('Incomplete matched Task–Expert baseline')
