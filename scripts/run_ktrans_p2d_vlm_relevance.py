@@ -11,7 +11,7 @@ import numpy as np
 from scripts.run_ktrans_p2b1_source_lopo import text_descriptors
 from urban_transfer.ktrans_p2b1 import aligned_samples,summarize_source_lopo
 from urban_transfer.ktrans_p2d_vlm import (
-    run_cross_task,run_same_task,summarize_same_task)
+    run_cross_task,run_same_task,summarize_same_task,vlm_signal_audit)
 
 def csv_write(path,records):
     if not records:raise ValueError('Missing result records')
@@ -105,6 +105,12 @@ def main():
             ('same_task_ucui_metrics.csv',same_task),
             ('same_macro_ucui.csv',same_macro)):
             csv_write(dest/name,rows)
+        signal=vlm_signal_audit(samples,descriptors)
+        csv_write(dest/'vlm_relevance_signal_audit.csv',signal)
+        n_variable=sum(r['n_unique_relevance_scores']>=2 for r in signal)
+        mean_delta=float(np.nanmean([r['mean_abs_image_task_minus_text_only'] for r in signal]))
+        print(f'[p2d-vlm] {bank:<13} evidence_relevance_variable_cues={n_variable}/{len(signal)} '
+              f'mean_abs_image_task_minus_text_only={mean_delta:.3f}',flush=True)
         metadata[bank]={'n_tiles':len(samples),
                         'n_source_expert_rows':len(raw),
                         'n_cross_metric_rows':len(cross)}
