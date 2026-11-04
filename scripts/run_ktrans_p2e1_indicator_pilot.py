@@ -190,7 +190,7 @@ def run(a):
         a.source_tasks=sources
         with (a.output/'vlm_evidence.jsonl').open('a') as f:
             def append_record(rec):
-                f.write(json.dumps(rec,ensure_ascii=False)+'\\n')
+                f.write(json.dumps(rec,ensure_ascii=False)+'\n')
                 f.flush();os.fsync(f.fileno())
             run_batched_jobs(model,processor,to_run,a,append_record)
     cache=cache_records(a.output/'vlm_evidence.jsonl')
