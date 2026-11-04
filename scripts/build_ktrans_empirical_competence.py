@@ -68,6 +68,8 @@ def main():
     for name in ('checkpoint','k5a-protocol','manifest','knowledge-cache','output'):
         parser.add_argument('--'+name,required=True,type=Path)
     parser.add_argument('--reuse-cache',type=Path,default=Path('runs/k7b_pilot/evidence.jsonl'))
+    parser.add_argument('--extra-reuse-cache',type=Path,action='append',default=[],
+                        help='Additional pre-existing VLM cache files')
     parser.add_argument('--model',default='Qwen/Qwen3-VL-8B-Instruct')
     parser.add_argument('--max-pixels',type=int,default=262144)
     parser.add_argument('--batch-size',type=int,default=512)
@@ -105,7 +107,7 @@ def main():
     if not set(outer_manifest).issubset(outer_train_keys):
         raise ValueError('VLM outer train manifest contains rows outside checkpoint OUTER TRAIN')
     vlm=validated_vlm_jobs(manifest,
-                          merge_records([a.reuse_cache,a.knowledge_cache]),
+                          merge_records([a.reuse_cache,*a.extra_reuse_cache,a.knowledge_cache]),
                           a.model,a.max_pixels)
     all_rows=[];reports=[];folds={}
     for pseudo in sources:
