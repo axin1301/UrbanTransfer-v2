@@ -89,11 +89,13 @@ def summary(samples):
         losses=np.stack([s['loss'] for s in group])
         means=losses.mean(0)
         ranks=np.argsort(means)
+        # Keep the sample axis for broadcasting (n_tiles, 1) -> (n_tiles, n_experts).
+        # Compute once per cohort, then split ties equally between best experts.
+        min_loss=losses.min(axis=1,keepdims=True)
+        winners=np.isclose(losses,min_loss,rtol=1e-10,atol=1e-12)
+        fractional_wins=winners/winners.sum(axis=1,keepdims=True)
         for j,expert in enumerate(experts):
-            # Fractional tie wins: ties share the minimum's credit.
-            min_loss=losses.min(1)
-            winners=np.isclose(losses,min_loss,rtol=1e-10,atol=1e-12)
-            win=float(np.mean(winners[:,j]/winners.sum(1)))
+            win=float(fractional_wins[:,j].mean())
             records.append({'pseudo_task':task,'inner_partition':split,
                 'expert':expert,'n_tiles':len(group),
                 'n_cities':len({s['city'] for s in group}),
