@@ -62,7 +62,7 @@ Four arms:
    but candidate relationship descriptions rotated between experts.
    **The VLM is NOT told which arm is a negative control.**
 
-10 no-image jobs + 80 image jobs = **90 Qwen3-VL inference
+10 no-image jobs + 80 image jobs = **90 Qwen3-VL-32B inference
 jobs** at default sample size. A region image is submitted only
 to the two region arms. Every job key hashes model, full prompt,
 condition, tile, and pixel budget; cached outputs are validated
@@ -94,9 +94,11 @@ python -m unittest discover -s tests -p 'test_ktrans_p2e1_eval.py' -v
 # CPU only; freezes all 90 exact model prompts/sample IDs and checks unknown units:
 python -u scripts/run_ktrans_p2e1_indicator_pilot.py --dry-run
 
-# With a real ROCm Qwen3-VL-8B GPU allocation:
+# With a real ROCm Qwen3-VL-32B multi-GPU allocation:
 python -u scripts/run_ktrans_p2e1_indicator_pilot.py \
-  --max-new-jobs 8
+  --model Qwen/Qwen3-VL-32B-Instruct \
+  --batch-size 8 \
+  --max-new-jobs 16
 
 # After inspecting first valid prompt JSON entries, finish remaining
 # cache jobs using the SAME command without a max-new-jobs cap:
@@ -107,7 +109,7 @@ python -u scripts/evaluate_ktrans_p2e1_indicator_pilot.py
 ```
 
 Default:
-`runs/ktrans_competence/p2e1_indicator_relation_source_dev/`
+`runs/ktrans_competence/p2e1_qwen3vl32b_source_dev/`
 
 Files:
 - `pilot_manifest.json`: frozen task/tile/image/source expert IDs,
@@ -148,3 +150,56 @@ temperature=0.5.
 If the pilot is promising, the next scientific step is new
 source-fold/target-independent, pre-registered evaluation, not
 immediate full-scale 3,337-tile VLM generation.
+
+## Qwen3-VL-32B runtime and cache separation
+
+As of P2-E1-32B, the inference default is
+`Qwen/Qwen3-VL-32B-Instruct` (official model), starting
+`--batch-size 8`, configurable `--batch-size 16`,
+and `--max-new-tokens 1536`. The previous 8B pilot's
+`runs/ktrans_competence/p2e1_indicator_relation_source_dev/`
+is intentionally **not** reused: the 32B model is a different
+experiment with a separate prompt-hashed manifest/cache/output folder.
+Do NOT change the model in an existing manifest directory.
+
+The batch runner never mixes image-bearing and text-only prompts,
+keeps request-key output order, and reduces 16→8→4→2→1 (or
+8→4→2→1) on GPU out-of-memory. Inability to load the 32B weights,
+or an OOM at batch size one, still requires more available accelerator
+memory or a different serving setup: batch backoff cannot solve model
+weight memory exhaustion. Qwen3-VL-32B BF16 weights alone require
+roughly 64 GiB before activations/vision overhead; ensure the
+allocated ROCm GPU group can hold the full model. Use the same
+HPC environment with a recent Qwen3-VL-compatible Transformers.
+
+Robust JSON parsing now accepts fenced JSON or an explanatory prefix,
+but **does not relax** expert identity, field count, 0..3 score ranges,
+null/missingness or required four-expert constraints. Every invalid
+response remains in the append-only JSONL with its raw text and
+`parsed=null`; subsequent invocations retry invalid jobs. The longer
+1536-token default reduces the risk of truncating the four expert
+profiles but cannot guarantee valid generations.
+
+For a first smoke test that reaches the multimodal arm, use
+`--max-new-jobs 16 --batch-size 8`: the first ten jobs are
+definition-only/definition+relation text prompts. A cap of 8
+runs only text prompts and **does not** test image batching.
+
+Recommended 32B commands:
+
+```bash
+git pull origin main
+python -m unittest discover -s tests -p 'test_ktrans_p2e1_indicator_pilot.py' -v
+python -u scripts/run_ktrans_p2e1_indicator_pilot.py --dry-run
+# On a suitable multi-GPU ROCm allocation:
+python -u scripts/run_ktrans_p2e1_indicator_pilot.py --batch-size 8 --max-new-jobs 16
+# After checking parser success and resource usage:
+python -u scripts/run_ktrans_p2e1_indicator_pilot.py --batch-size 16
+# Only when all 32B jobs are complete:
+python -u scripts/evaluate_ktrans_p2e1_indicator_pilot.py
+```
+
+Increasing the parameter count is a hypothesis, not proof of
+better knowledge quality or improved cross-task transfer: compare
+32B valid output rate, expert differentiation, region-specific
+variation and source-LOPO performance against frozen baselines.
