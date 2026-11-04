@@ -71,7 +71,21 @@ class P2B0ControlsTest(unittest.TestCase):
         a=run_negative_controls(src,seed=42,repeats=3,min_group=5)
         b=run_negative_controls(src,seed=42,repeats=3,min_group=5)
         self.assertEqual(a[0],b[0])
-        self.assertEqual(a[2],b[2])
+        # A shuffled cohort may have no evaluable high/low contrasts:
+        # both runs legitimately report NaN; NaN != NaN for list/dict
+        # equality, so compare numeric metrics with equal_nan=True.
+        self.assertEqual(len(a[2]),len(b[2]))
+        for first,second in zip(a[2],b[2]):
+            self.assertEqual(first.keys(),second.keys())
+            for key in first:
+                if isinstance(first[key],float):
+                    np.testing.assert_allclose(first[key],second[key],
+                                               rtol=0,atol=0,equal_nan=True)
+                else:
+                    self.assertEqual(first[key],second[key])
+        self.assertTrue(any(
+            np.isnan(r['agreement_rate']) for r in a[2]
+        ),'Fixture should exercise undefined agreement in shuffled cohorts')
         self.assertEqual(len(a[2]),9)
         self.assertEqual(len(a[3]),3)
         self.assertTrue(all(0<r['descriptive_tail_fraction_ge_observed']<=1
