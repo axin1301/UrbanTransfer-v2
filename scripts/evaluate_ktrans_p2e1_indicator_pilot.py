@@ -38,7 +38,7 @@ def main():
     evidence=[json.loads(l) for l in (a.input/'competence_rows.jsonl').read_text().splitlines() if l.strip()]
     if len(evidence)!=original['n_expert_rows']:raise ValueError('Wrong paired evidence count')
     hypotheses=collect_hypotheses(manifest,valid)
-    task,macro=run_lopo(manifest['tiles'],evidence,manifest,hypotheses,sources,
+    task,macro=run_lopo(evidence,manifest,hypotheses,sources,
                         a.alpha,a.temperature)
     write_csv(a.pilot/'p2e1_source_lopo_task.csv',task)
     write_csv(a.pilot/'p2e1_source_lopo_macro.csv',macro)
