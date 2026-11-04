@@ -1,7 +1,6 @@
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-import hashlib
 import pandas as pd
 from urban_transfer.ktrans_source_coverage import (
     full_source_manifest,validate_full_source_manifest,coverage_plan)
@@ -9,21 +8,23 @@ from scripts.cache_ktrans_k7d import unique_jobs,get_pending
 
 class FullSourceCoverageTests(unittest.TestCase):
     def setUp(self):
+        # Real registered tasks are required: unique_jobs builds actual
+        # task-conditioned VLM prompts from task_texts('structured').
         self.ds=SimpleNamespace(
-           df=pd.DataFrame({'indicator_column':['src_a','src_b','target','src_a'],
+           df=pd.DataFrame({'indicator_column':['population_count','food_accessibility','education_accessibility','population_count'],
                             'city':['known','known','new','known']}),
            base=SimpleNamespace(paths=['/tmp/img_a.png','/tmp/img_b.png',
                     '/tmp/target.png','/tmp/img_c.png']))
         self.splits={'train':[0,1,3],'meta_SCUI':[],
                      'meta_UCSI':[],'meta_UCUI':[2]}
-        self.meta={'source_tasks':['src_a','src_b'],'heldout_task':'target',
+        self.meta={'source_tasks':['population_count','food_accessibility'],'heldout_task':'education_accessibility',
                    'heldout_cities':['new'],'seed':42}
         self.path=Path('/tmp/k4/best.pt')
 
     def test_only_outer_train_exported_and_complete(self):
         m=full_source_manifest(self.ds,self.splits,self.meta,self.path)
         self.assertEqual(len(m['rows']),3)
-        self.assertEqual({r['task'] for r in m['rows']},{'src_a','src_b'})
+        self.assertEqual({r['task'] for r in m['rows']},{'population_count','food_accessibility'})
         self.assertTrue(all(r['partition']=='train' for r in m['rows']))
         self.assertEqual(validate_full_source_manifest(m,self.ds,self.splits,
                         self.meta,self.path),3)
@@ -58,7 +59,7 @@ class FullSourceCoverageTests(unittest.TestCase):
         m['rows'].pop()
         with self.assertRaises(ValueError):
             validate_full_source_manifest(m,self.ds,self.splits,self.meta,self.path)
-        self.ds.df.loc[0,'indicator_column']='target'
+        self.ds.df.loc[0,'indicator_column']='education_accessibility'
         with self.assertRaises(ValueError):
             full_source_manifest(self.ds,self.splits,self.meta,self.path)
 
