@@ -36,6 +36,16 @@ def recover(manifest,cache,reuse,model,max_pixels):
             raise ValueError('Cache provenance mismatch for key '+job['key'])
         raw=row.get('raw','')
         parsed,extras,reason=project_image_only_v2(raw)
+        # A top-level null confidence denotes all six missing confidences.
+        # Record the equivalence explicitly so the schema normalization
+        # cannot be mistaken for hallucinated or zero-valued evidence.
+        whole_null_confidence=False
+        try:
+            whole_null_confidence=json.loads(raw).get('evidence_confidence','MISSING') is None
+        except (ValueError,AttributeError):
+            pass
+        if parsed is not None and whole_null_confidence:
+            reason='expanded_null_confidence' if reason=='strict' else reason+'+expanded_null_confidence'
         audit.append({'tile_id':job['tile_id'],'status':reason,
                       'discarded_fields':';'.join(extras),
                       'raw_chars':len(raw)})
@@ -43,7 +53,8 @@ def recover(manifest,cache,reuse,model,max_pixels):
         if parsed is not None:
             record={**row,'parsed':parsed,'parse_status':reason,
                     'discarded_extra_fields':list(extras),
-                    'recovery_policy':'k7d-image-only-projection-v1'}
+                    'recovery_policy':'k7d-image-only-projection-v2',
+                    'whole_null_confidence_expanded':whole_null_confidence}
             add.append(record)
     return add,audit,summary,len(jobs)
 

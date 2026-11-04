@@ -61,6 +61,27 @@ class K7DCacheRecoveryTests(unittest.TestCase):
             cache=merge_records([path])
             self.assertEqual(len(get_pending([self.job],cache)),0)
 
+    def test_whole_null_confidence_recovered_without_gpu(self):
+        raw={**self.raw,'evidence_confidence':None}
+        parsed,extras,reason=project_image_only_v2(json.dumps(raw))
+        self.assertEqual(reason,'strict')
+        self.assertEqual(extras,())
+        self.assertTrue(all(parsed['evidence_confidence'][c] is None for c in CUES))
+        x=encode_record(parsed,'image_only')
+        self.assertEqual(float(x[30:36].sum()),0.)
+        self.assertGreater(float(x[18:24].sum()),0.)
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/'evidence.jsonl'
+            row={**self.job,'raw':json.dumps(raw),'parsed':None}
+            path.write_text(json.dumps(row)+'\\n')
+            add,audit,counts,total=recover(self.manifest,path,Path(tmp)/'none',
+                                             'test-model',262144)
+            self.assertEqual(total,1)
+            self.assertEqual(counts['expanded_null_confidence'],1)
+            self.assertEqual(len(add),1)
+            self.assertTrue(add[0]['whole_null_confidence_expanded'])
+            self.assertEqual(add[0]['raw'],row['raw'])
+
     def test_merge_records_keeps_valid_if_later_attempt_invalid(self):
         with tempfile.TemporaryDirectory() as tmp:
             path=Path(tmp)/'test.jsonl'
