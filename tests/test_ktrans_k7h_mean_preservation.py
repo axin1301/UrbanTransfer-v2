@@ -9,7 +9,7 @@ class K7HMeanPreservationTests(unittest.TestCase):
         prediction=np.array([2.,5.,4.,7.])
         tasks=['task_a','task_a','task_b','task_b']
         adjusted,audit=preserve_mean(baseline,prediction,tasks)
-        np.testing.assert_allclose(adjusted,[.5,3.5,.5,5.5])
+        np.testing.assert_allclose(adjusted,[.5,3.5,1.5,4.5])
         self.assertEqual(len(audit),2)
         self.assertAlmostEqual(audit[0]['label_free_shift_subtracted'],1.5)
         self.assertAlmostEqual(audit[1]['label_free_shift_subtracted'],2.5)
