@@ -75,7 +75,7 @@ def relationship(target,source,spec):
         'verified_empirical_transfer':False}
 
 def expert_cards(target,source_tasks,spec,with_relation):
-    if target not in spec or target in source_tasks is False:pass
+    if target not in spec or target not in source_tasks:raise ValueError('Unknown target source task')
     experts=tuple(sorted(t for t in source_tasks if t!=target))
     if len(experts)!=4 or target in experts:raise ValueError('Expected four non-own source experts')
     out=[]
