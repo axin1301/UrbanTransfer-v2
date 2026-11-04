@@ -75,8 +75,6 @@ def main():
     associations=[{'inner_partition':split,**task_semantic_association(
         [r for r in comparisons if r['inner_partition']==split])}
         for split in ('meta_SCUI','meta_UCUI')]
-    if args.k5a_protocol.parent/'inner_source_only.csv' is None:
-        raise AssertionError('unreachable')
     csv_path=args.k5a_protocol.parent/'inner_source_only.csv'
     if not csv_path.is_file():raise FileNotFoundError(str(csv_path))
     checkpoints={}
