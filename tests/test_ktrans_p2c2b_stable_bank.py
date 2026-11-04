@@ -111,6 +111,37 @@ class StableBankTests(unittest.TestCase):
             # but the full source expert state (moments) must change.
             self.assertNotEqual(bank['a']['hash'],retrained['a']['hash'])
 
+    def test_original_source_city_fold_provenance_must_match(self):
+        from pathlib import Path
+        from scripts.run_ktrans_p2c2b_stable_bank import audit_input
+        sources,old=evidence_fixture()
+        k5a={'outer_task':'outer','inner_source_tasks':list(TASKS),
+             'outer_checkpoint':'/tmp/outer_best.pt'}
+        evidence={'version':'ktrans-empirical-competence-v1',
+            'source_tasks':list(TASKS),'outer_target_excluded':'outer',
+            'k5a_protocol':'/tmp/k5a/protocol.json',
+            'manifest':'/tmp/full_source_manifest.json',
+            'k4_checkpoint_for_provenance_only':'/tmp/outer_best.pt',
+            'inner_partitions':['meta_SCUI','meta_UCUI'],
+            'n_expert_rows':len(old),
+            'folds':{
+                t:{'checkpoint_choice':'last.pt',
+                   'inner_training_tasks':[k for k in TASKS if k!=t],
+                   'heldout_cities':['unseen1']} for t in TASKS
+            }}
+        manifest={'source_manifest_mode':'outer-train-full-v1',
+                  'heldout_task':'outer','source_tasks':list(TASKS)}
+        result=audit_input(evidence,k5a,manifest,old,
+            Path('/tmp/k5a/protocol.json'),
+            Path('/tmp/full_source_manifest.json'))
+        self.assertEqual(result[2],{'unseen1'})
+        bad={**evidence,'folds':{k:dict(v) for k,v in evidence['folds'].items()}}
+        bad['folds']['a']['heldout_cities']=['different']
+        with self.assertRaises(ValueError):
+            audit_input(bad,k5a,manifest,old,
+                Path('/tmp/k5a/protocol.json'),
+                Path('/tmp/full_source_manifest.json'))
+
     def test_duplicate_training_or_missing_source_task_rejected(self):
         source,_=evidence_fixture()
         with self.assertRaises(ValueError):
