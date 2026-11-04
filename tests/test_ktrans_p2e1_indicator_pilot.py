@@ -115,6 +115,41 @@ class IndicatorPilotTests(unittest.TestCase):
         malformed['experts'][TASKS[1]]['region_support']=2
         self.assertIsNone(parse(json.dumps(malformed),TASKS,task,False))
 
+    def test_long_explanations_are_accepted_but_schema_stays_strict(self):
+        task=TASKS[0]
+        long=fake(task,True)
+        for item in long['experts'].values():
+            item['reason']='R'*227
+            item['complementarity']='C'*110
+        long['limitations']='L'*301
+        self.assertIsNotNone(parse(json.dumps(long),TASKS,task,True))
+        for field,value in (('reason','R'*513),('complementarity','C'*257)):
+            bad=json.loads(json.dumps(long))
+            bad['experts'][TASKS[1]][field]=value
+            self.assertIsNone(parse(json.dumps(bad),TASKS,task,True))
+        bad=json.loads(json.dumps(long))
+        bad['limitations']='L'*513
+        self.assertIsNone(parse(json.dumps(bad),TASKS,task,True))
+        bad=json.loads(json.dumps(long))
+        bad['experts'][TASKS[1]]['compatibility']=4
+        self.assertIsNone(parse(json.dumps(bad),TASKS,task,True))
+
+    def test_old_parsed_null_cache_revalidates_without_generation(self):
+        from scripts.run_ktrans_p2e1_indicator_pilot import cache_records,is_valid
+        task=TASKS[0]
+        raw=json.dumps(fake(task,True))
+        job={'key':'existing','version':'v1','arm':'definition_relation_region',
+             'task':task,'tile_id':'tile','model':'Qwen32B',
+             'max_pixels':262144,'prompt':'unchanged'}
+        old={**job,'raw':raw,'parsed':None}
+        with tempfile.TemporaryDirectory() as d:
+            p=Path(d)/'vlm_evidence.jsonl'
+            p.write_text(json.dumps(old)+'\n')
+            row=cache_records(p)['existing']
+            self.assertTrue(is_valid(job,row))
+            self.assertIsNotNone(parse(row['raw'],TASKS,task,True))
+            self.assertFalse(is_valid({**job,'prompt':'changed'},row))
+
     def test_batch_grouping_and_per_job_identity(self):
         from types import SimpleNamespace
         from unittest.mock import patch

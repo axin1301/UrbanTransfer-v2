@@ -203,3 +203,34 @@ Increasing the parameter count is a hypothesis, not proof of
 better knowledge quality or improved cross-task transfer: compare
 32B valid output rate, expert differentiation, region-specific
 variation and source-LOPO performance against frozen baselines.
+
+## Parser revision and existing 32B cache recovery
+
+The running P2-E1 prompt, generation settings, frozen manifest, and job
+hashes are **unchanged**. Parser-only maximum lengths for explanatory
+text are increased to 512 (`reason`), 256 (`complementarity`) and
+512 (`limitations`). The four exact named experts, six exact fields,
+ordinal 0..3/null types and no-image `region_support=null` stay strict.
+Text is preserved intact; no invalid numeric scores are repaired.
+
+Older append-only JSONL records saved with `parsed=null` may contain
+complete valid JSON whose narrative fields exceeded the former limits.
+The runner now checks original raw JSON against the revised parser and
+the unchanged model/task/prompt identity before deciding to rerun jobs.
+The evaluator applies the same revalidation and still requires 100%
+complete, structurally valid jobs before reporting LOPO results.
+
+To check existing cached responses **without loading Qwen or spending GPU**:
+
+```bash
+python -m unittest discover -s tests -p 'test_ktrans_p2e1_indicator_pilot.py' -v
+python -u scripts/run_ktrans_p2e1_indicator_pilot.py --revalidate-only
+```
+
+This refreshes `vlm_expert_hypotheses.csv` and `protocol.json` from
+the original cached raw outputs, without rerunning outstanding jobs.
+For remaining jobs, run the original command (without
+`--revalidate-only`) after reviewing the new counts. Report original
+and revised parser acceptance separately; this is a format robustness
+change, **not** evidence that the VLM is more accurate or that the
+exploratory development protocol has become an independent test.

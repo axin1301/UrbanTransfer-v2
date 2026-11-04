@@ -166,10 +166,10 @@ def parse(raw,source_tasks,task,has_image):
                 return None
         if not has_image and row['region_support'] is not None:return None
         if row['uncertainty'] is None:return None
-        if not isinstance(row['reason'],str) or len(row['reason'])>180:return None
-        if not isinstance(row['complementarity'],str) or len(row['complementarity'])>100:return None
+        if not isinstance(row['reason'],str) or len(row['reason'])>512:return None
+        if not isinstance(row['complementarity'],str) or len(row['complementarity'])>256:return None
         normalized[expert]=row
-    if not isinstance(obj.get('limitations'),str) or len(obj['limitations'])>240:
+    if not isinstance(obj.get('limitations'),str) or len(obj['limitations'])>512:
         return None
     return {'experts':normalized,'limitations':obj['limitations']}
 
