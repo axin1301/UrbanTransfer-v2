@@ -28,8 +28,8 @@ SYSTEM=(
 def prompt(task,descriptions):
     header=(GENERAL if task=='image_only'
       else 'Task context (NOT a label or observed value): '+descriptions[task]+
-           '\\nDescribe observable scene evidence that may be relevant, but do not predict the indicator.')
-    return (header+'\\nReturn a JSON object with keys: "scene" (at most 40 words), '
+           '\nDescribe observable scene evidence that may be relevant, but do not predict the indicator.')
+    return (header+'\nReturn a JSON object with keys: "scene" (at most 40 words), '
       '"visual_cues" (object mapping each cue to ordinal 0,1,2,3 or null), '
       '"task_relevance" (object mapping each cue to ordinal 0,1,2,3 or null), '
       '"limitations" (short string). Cues: '+', '.join(CUES)+
@@ -42,7 +42,7 @@ def parse_output(raw):
     try:
         x=json.loads(raw)
     except json.JSONDecodeError:
-        match=re.search(r'\\{.*\\}',raw,re.S)
+        match=re.search(r'\{.*\}',raw,re.S)
         if not match:return None
         try:x=json.loads(match.group(0))
         except json.JSONDecodeError:return None
@@ -172,7 +172,7 @@ def run(args):
                 'task':task,'model':args.model,'prompt':sentence,
                 'max_pixels':args.max_pixels,'raw':raw,'parsed':parsed}
         with args.output.open('a') as f:
-            f.write(json.dumps(record,ensure_ascii=False)+'\\n')
+            f.write(json.dumps(record,ensure_ascii=False)+'\n')
             f.flush()
             os.fsync(f.fileno())
         print(f'[k7] {counter}/{len(jobs)} task={task:<30} '
@@ -191,7 +191,7 @@ def main():
     p.add_argument('--n-tiles',type=int,default=8)
     p.add_argument('--seed',type=int,default=42)
     p.add_argument('--max-pixels',type=int,default=512*512)
-    p.add_argument('--max-new-tokens',type=int,default=200)
+    p.add_argument('--max-new-tokens',type=int,default=320)
     args=p.parse_args();run(args)
 
 if __name__=='__main__':main()
