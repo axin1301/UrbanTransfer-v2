@@ -54,6 +54,24 @@ def write_csv(path,rows):
     with path.open('w',newline='') as f:
         w=csv.DictWriter(f,fieldnames=fields);w.writeheader();w.writerows(rows)
 
+def freeze_manifest(path,manifest):
+    """Compare canonical JSON objects rather than Python tuple/list containers.
+
+    JSON turns source_tasks tuples into lists on disk. The exact same
+    dry-run must therefore be accepted on a subsequent GPU resume,
+    while any genuine prompt, sample, model, or metadata change
+    remains a hard error rather than silently reusing stale results.
+    """
+    normalized=json.loads(json.dumps(manifest,ensure_ascii=False))
+    path=Path(path)
+    if path.exists():
+        prior=json.loads(path.read_text())
+        if prior!=normalized:
+            raise ValueError('Existing pilot manifest differs: use a new output directory')
+    else:
+        path.write_text(json.dumps(normalized,indent=2,ensure_ascii=False))
+
+
 def run(a):
     original=json.loads((a.input/'protocol.json').read_text())
     if original.get('version')!='ktrans-empirical-competence-v1':
@@ -87,10 +105,7 @@ def run(a):
     # Freeze pilot manifest for reproducibility; refuse silent accidental resampling.
     manifest_path=a.output/'pilot_manifest.json'
     manifest={'plan':plan,'tiles':tiles,'jobs':jobs,'indicator_specs':spec}
-    if manifest_path.exists():
-        prior=json.loads(manifest_path.read_text())
-        if prior!=manifest:raise ValueError('Existing pilot manifest differs: use a new output directory')
-    else:manifest_path.write_text(json.dumps(manifest,indent=2,ensure_ascii=False))
+    freeze_manifest(manifest_path,manifest)
     pending=[]
     cache=cache_records(a.output/'vlm_evidence.jsonl')
     for job in jobs:
