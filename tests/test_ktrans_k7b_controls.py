@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from scripts.run_ktrans_k7b_controls import (
-    CUES,build_prompt,parse,jobs_for,load_cached,read_tile_manifest)
+    CUES,build_prompt,parse,jobs_for,load_cached,read_tile_manifest,TEXT_ONLY_SYSTEM,TEXT_ONLY_PROTOCOL)
 from scripts.diagnose_ktrans_k7b_controls import compute
 
 class K7BControlsTests(unittest.TestCase):
@@ -41,6 +41,25 @@ class K7BControlsTests(unittest.TestCase):
         self.assertIn('distance-decay school access',image)
         self.assertIn('distance-decay school access',text)
         self.assertIn('NO image',text)
+        self.assertIn(TEXT_ONLY_PROTOCOL,text)
+        self.assertIn('IF this cue were visible',text)
+        self.assertIn('WITHOUT any image',TEXT_ONLY_SYSTEM)
+        self.assertNotIn(TEXT_ONLY_PROTOCOL,image)
+
+    def test_conceptual_text_only_scores_can_exist_without_visual_cues(self):
+        item=self._obj('text_only')
+        item['evidence_relevance']={c:2 for c in CUES}
+        result=parse(json.dumps(item),'text_only')
+        self.assertIsNotNone(result)
+        self.assertTrue(all(result['visual_cues'][c] is None for c in CUES))
+        self.assertEqual(result['evidence_relevance']['roads'],2)
+
+    def test_conceptual_prompt_cache_id_differs_from_old_baseline(self):
+        tiles=[{'tile_id':'a','city':'A','image_name':'a.png','image_path':'a.png'}]
+        jobs=jobs_for(tiles,('education_accessibility',),'test',262144)
+        self.assertEqual(len(jobs),3)
+        baseline=[j for j in jobs if j[3]=='text_only'][0]
+        self.assertIn(TEXT_ONLY_PROTOCOL,baseline[4])
 
     def test_exact_factorial_jobs_and_cache(self):
         tiles=[{'tile_id':'a','city':'A','image_name':'a.png','image_path':'a.png'},
