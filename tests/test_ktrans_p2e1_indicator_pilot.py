@@ -79,6 +79,27 @@ class IndicatorPilotTests(unittest.TestCase):
         self.assertTrue(all('control_note' not in row['relation_to_target'] for row in perm))
         self.assertNotIn('permuted_relation_region',prompt(TASKS[0],TASKS,spec,'permuted_relation_region'))
 
+    def test_manifest_roundtrip_accepts_existing_dry_run_and_rejects_changes(self):
+        from scripts.run_ktrans_p2e1_indicator_pilot import freeze_manifest
+        spec=catalog()
+        jobs=make_jobs(sample_source_rows(rows(),TASKS,1),TASKS,spec,
+                       'fake-vlm',262144)
+        manifest={'plan':{'source_tasks':tuple(TASKS),'seed':42},
+                  'jobs':jobs,'indicator_specs':spec}
+        with tempfile.TemporaryDirectory() as d:
+            path=Path(d)/'pilot_manifest.json'
+            freeze_manifest(path,manifest)
+            old_bytes=path.read_bytes()
+            # Simulates CPU --dry-run followed by GPU --max-new-jobs 8
+            # with identical arguments; tuples become JSON lists.
+            freeze_manifest(path,manifest)
+            self.assertEqual(path.read_bytes(),old_bytes)
+            modified={'plan':{'source_tasks':tuple(TASKS),'seed':43},
+                      'jobs':jobs,'indicator_specs':spec}
+            with self.assertRaisesRegex(ValueError,'manifest differs'):
+                freeze_manifest(path,modified)
+            self.assertEqual(path.read_bytes(),old_bytes)
+
     def test_strict_json_parse_and_unknown_capability(self):
         task=TASKS[0]
         self.assertIsNotNone(parse(json.dumps(fake(task,False)),TASKS,task,False))
