@@ -29,24 +29,81 @@ def is_valid(job,row):
         row.get(k)==job[k] for k in
         ('version','arm','task','tile_id','model','max_pixels','prompt')))
 
-def infer(model,processor,job,max_new_tokens):
+def infer_batch(model,processor,jobs,max_new_tokens):
+    """Batched Qwen3-VL generation; do not mix text-only and image jobs.
+
+    Prompts and image count differ across arms. Preserve exact job order
+    in returned raw strings; batch decoding slices the padded input.
+    """
     from PIL import Image
-    if job['image_path'] is None:
-        content=[{'type':'text','text':job['prompt']}]
-    else:
-        with Image.open(job['image_path']) as im:
-            content=[{'type':'image','image':im.convert('RGB')},
-                     {'type':'text','text':job['prompt']}]
-    msgs=[{'role':'system','content':[{'type':'text','text':SYSTEM}]},
-          {'role':'user','content':content}]
-    inputs=processor.apply_chat_template([msgs],tokenize=True,
+    import torch
+    if not jobs:raise ValueError('Empty inference batch')
+    image_mode=jobs[0]['image_path'] is not None
+    if any((j['image_path'] is not None)!=image_mode for j in jobs):
+        raise ValueError('Cannot mix image and text-only requests in one batch')
+    messages=[]
+    for job in jobs:
+        if image_mode:
+            with Image.open(job['image_path']) as im:
+                content=[{'type':'image','image':im.convert('RGB')},
+                         {'type':'text','text':job['prompt']}]
+        else:
+            content=[{'type':'text','text':job['prompt']}]
+        messages.append([
+            {'role':'system','content':[{'type':'text','text':SYSTEM}]},
+            {'role':'user','content':content}])
+    inputs=processor.apply_chat_template(messages,tokenize=True,
         add_generation_prompt=True,padding=True,
         return_dict=True,return_tensors='pt').to(model.device)
-    import torch
     with torch.inference_mode():
-        tokens=model.generate(**inputs,max_new_tokens=max_new_tokens,do_sample=False)
-    return processor.batch_decode(tokens[:,inputs['input_ids'].shape[1]:],
-                                  skip_special_tokens=True)[0].strip()
+        tokens=model.generate(**inputs,max_new_tokens=max_new_tokens,
+                              do_sample=False)
+    if tokens.shape[0]!=len(jobs):
+        raise ValueError('Batched output count differs from job count')
+    decoded=processor.batch_decode(tokens[:,inputs['input_ids'].shape[1]:],
+                                   skip_special_tokens=True)
+    if len(decoded)!=len(jobs):raise ValueError('Batched decode cardinality mismatch')
+    return [v.strip() for v in decoded]
+
+def run_batched_jobs(model,processor,jobs,a,append_record):
+    """Dynamic OOM backoff from 8/16 to 1 while keeping all jobs ordered.
+
+    Every valid or invalid response is recorded with exact model/prompt
+    identity. A later invocation can retry invalid outputs.
+    """
+    import torch
+    position=0;size=a.batch_size
+    while position<len(jobs):
+        image_mode=jobs[position]['image_path'] is not None
+        group=[]
+        for job in jobs[position:position+size]:
+            if (job['image_path'] is not None)!=image_mode:break
+            group.append(job)
+        try:
+            raws=infer_batch(model,processor,group,a.max_new_tokens)
+        except (RuntimeError,torch.OutOfMemoryError) as exc:
+            msg=str(exc).lower()
+            oom=isinstance(exc,torch.OutOfMemoryError) or any(
+                k in msg for k in ('out of memory','memory allocation','hip out of memory'))
+            if not oom or len(group)==1:
+                raise
+            size=max(1,len(group)//2)
+            if torch.cuda.is_available():torch.cuda.empty_cache()
+            print(f'[p2e1] GPU OOM; retry batch_size={size} '
+                  f'completed={position}/{len(jobs)}',flush=True)
+            continue
+        for job,raw in zip(group,raws):
+            parsed=parse(raw,a.source_tasks,job['task'],
+                         job['image_path'] is not None)
+            rec={**job,'system_prompt':SYSTEM,'raw':raw,
+                 'parsed':parsed,'requested_batch_size':a.batch_size,
+                 'actual_batch_size':len(group)}
+            append_record(rec)
+            position+=1
+            print(f'[p2e1] {position}/{len(jobs)} batch={len(group)} '
+                  f'{job["arm"]} task={job["task"]} '
+                  f'parsed={"OK" if parsed is not None else "INVALID"} '
+                  f'raw_chars={len(raw)}',flush=True)
 
 def write_csv(path,rows):
     if not rows:return
@@ -158,13 +215,15 @@ def run(a):
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--input',type=Path,default=Path('runs/ktrans_competence/education_all_outer_train_dev'))
-    p.add_argument('--output',type=Path,default=Path('runs/ktrans_competence/p2e1_indicator_relation_source_dev'))
+    p.add_argument('--output',type=Path,default=Path('runs/ktrans_competence/p2e1_qwen3vl32b_source_dev'))
     p.add_argument('--reviewed-methodology',type=Path)
     p.add_argument('--tiles-per-task-split',type=int,default=4)
     p.add_argument('--seed',type=int,default=42)
-    p.add_argument('--model',default='Qwen/Qwen3-VL-8B-Instruct')
+    p.add_argument('--model',default='Qwen/Qwen3-VL-32B-Instruct')
     p.add_argument('--max-pixels',type=int,default=262144)
-    p.add_argument('--max-new-tokens',type=int,default=750)
+    p.add_argument('--max-new-tokens',type=int,default=1536)
+    p.add_argument('--batch-size',type=int,default=8,choices=(1,2,4,8,16),
+                   help='Start batch 8 or 16; auto-halves on GPU OOM')
     p.add_argument('--max-new-jobs',type=int,default=0)
     p.add_argument('--dry-run',action='store_true')
     a=p.parse_args()
