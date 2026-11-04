@@ -23,7 +23,7 @@ from urban_transfer.ktrans_p2b2 import (
 from urban_transfer.ktrans_p2c1 import (
     standardize_effects,task_pair_structure,rank_structure,task_semantic_association)
 from urban_transfer.ktrans_p2c2b_stable_bank import (
-    fit_bank,export_stable_evidence,bank_report)
+    fit_bank,export_stable_evidence,bank_report,save_bank,load_bank)
 
 def audit_input(evidence,k5a,manifest,old_rows,protocol_path,manifest_path):
     src=tuple(sorted(evidence['source_tasks']))
@@ -154,6 +154,10 @@ def run(args):
           }
     (args.output/'protocol.json').write_text(json.dumps(meta,indent=2))
     write_csv(args.output/'stable_expert_training.csv',bank_report(bank))
+    save_bank(args.output/'stable_expert_bank.npz',bank)
+    loaded=load_bank(args.output/'stable_expert_bank.npz')
+    if {k:v['hash'] for k,v in loaded.items()}!={k:v['hash'] for k,v in bank.items()}:
+        raise ValueError('Frozen model persistence roundtrip mismatch')
     print('[p2c2b] frozen_source_experts=',len(bank),
           'source_tiles=',len(records),'paired_eval_tiles=',len(samples),
           'expert_rows=',len(stable),flush=True)
