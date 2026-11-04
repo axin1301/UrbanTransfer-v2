@@ -90,6 +90,12 @@ def run(args):
     if args.alpha<=0 or args.competence_alpha<=0 or args.temperature<=0 or args.min_group<1:
         raise ValueError('Positive fixed hyperparameters required')
     evidence=json.loads((args.input/'protocol.json').read_text())
+    # Resolve original provenance directly from source-only evidence;
+    # avoid requiring a guessed $K5A_PROTOCOL HPC environment path.
+    if args.k5a_protocol is None:
+        args.k5a_protocol=Path(evidence['k5a_protocol'])
+    if args.manifest is None:
+        args.manifest=Path(evidence['manifest'])
     k5a=json.loads(args.k5a_protocol.read_text())
     manifest=json.loads(args.manifest.read_text())
     old=[]
@@ -196,8 +202,10 @@ def run(args):
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--input',type=Path,required=True)
-    p.add_argument('--k5a-protocol',type=Path,required=True)
-    p.add_argument('--manifest',type=Path,required=True)
+    p.add_argument('--k5a-protocol',type=Path,default=None,
+                   help='By default read the exact path from original competence protocol')
+    p.add_argument('--manifest',type=Path,default=None,
+                   help='By default read the exact source train manifest from original competence protocol')
     p.add_argument('--knowledge-cache',type=Path,required=True)
     p.add_argument('--reuse-cache',type=Path,default=Path('runs/k7b_pilot/evidence.jsonl'))
     p.add_argument('--extra-reuse-cache',type=Path,action='append',default=[])
