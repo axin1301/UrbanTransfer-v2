@@ -60,13 +60,13 @@ test -f "$K4_CKPT" && test -f "$K5A_PROTOCOL" && test -f "$K7D_MANIFEST"
 The full pipeline is ONE command:
 
 ```bash
-mkdir -p runs/k7d_education/overnight
+mkdir -p runs/k7d_education
 
 python -u scripts/run_ktrans_k7d_unattended.py \
   --checkpoint "$K4_CKPT" \
   --k5a-protocol "$K5A_PROTOCOL" \
   --manifest "$K7D_MANIFEST" \
-  --output-dir runs/k7d_education/overnight \
+  --output-dir runs/k7d_education \
   --reuse-cache runs/k7b_pilot/evidence.jsonl \
   --batch-size 8 \
   --preflight 8 \
@@ -76,22 +76,10 @@ python -u scripts/run_ktrans_k7d_unattended.py \
   --max-new-tokens 440
 ```
 
-Important: if you have already generated valid `image_task` records
-in `runs/k7d_education/evidence.jsonl`, **reuse them**. The on-node
-runner writes to `--output-dir/evidence.jsonl`. EITHER:
-- point `--output-dir` at the same parent directory as the existing
-  `evidence.jsonl` (recommended), OR
-- use `--reuse-cache runs/k7d_education/evidence.jsonl` for previously
-  generated records, but then also place any valid older K7-B cache
-  under the selected evidence file or use the cache merging commands.
-
-To reuse the existing ongoing K7-D results with the simplest setup,
-run the runner with:
-`--output-dir runs/k7d_education`
-and keep
-`--reuse-cache runs/k7b_pilot/evidence.jsonl`.
-The `image_only-v2` keys differ, while valid old `image_task`
-and `text_only` records remain immediately reusable.
+Use `--output-dir runs/k7d_education` to reuse your existing
+`runs/k7d_education/evidence.jsonl` directly. The new v2 image-only
+cache keys differ, while all valid image+task and text-only keys remain
+unchanged. The old invalid records are retained for audit.
 
 ## For no-terminal-attention operation
 
