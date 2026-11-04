@@ -144,6 +144,17 @@ class IndicatorPilotTests(unittest.TestCase):
         self.assertTrue(all(x['model']=='Qwen/Qwen3-VL-32B-Instruct'
                             for x in outputs))
 
+    def test_32b_model_has_distinct_cache_keys_from_8b(self):
+        specs=catalog()
+        tiles=sample_source_rows(rows(),TASKS,1)
+        small=make_jobs(tiles,TASKS,specs,'Qwen/Qwen3-VL-8B-Instruct',262144)
+        large=make_jobs(tiles,TASKS,specs,'Qwen/Qwen3-VL-32B-Instruct',262144)
+        self.assertEqual(len(small),len(large))
+        self.assertFalse(set(j['key'] for j in small) &
+                         set(j['key'] for j in large))
+        self.assertEqual([j['tile_id'] for j in small],
+                         [j['tile_id'] for j in large])
+
     def test_batch_16_oom_backoff_keeps_jobs_in_order(self):
         from types import SimpleNamespace
         from unittest.mock import patch
