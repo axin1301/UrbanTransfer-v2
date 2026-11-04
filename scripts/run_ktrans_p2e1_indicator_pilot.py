@@ -187,15 +187,12 @@ def run(a):
             a.model,dtype=torch.bfloat16,device_map='auto',
             attn_implementation='sdpa',low_cpu_mem_usage=True).eval()
         to_run=pending[:a.max_new_jobs] if a.max_new_jobs else pending
+        a.source_tasks=sources
         with (a.output/'vlm_evidence.jsonl').open('a') as f:
-            for i,job in enumerate(to_run,1):
-                raw=infer(model,processor,job,a.max_new_tokens)
-                parsed=parse(raw,sources,job['task'],job['image_path'] is not None)
-                rec={**job,'system_prompt':SYSTEM,'raw':raw,'parsed':parsed}
-                f.write(json.dumps(rec,ensure_ascii=False)+'\n')
+            def append_record(rec):
+                f.write(json.dumps(rec,ensure_ascii=False)+'\\n')
                 f.flush();os.fsync(f.fileno())
-                print(f'[p2e1] {i}/{len(to_run)} {job["arm"]} task={job["task"]} '
-                      f'parsed={"OK" if parsed is not None else "INVALID"}',flush=True)
+            run_batched_jobs(model,processor,to_run,a,append_record)
     cache=cache_records(a.output/'vlm_evidence.jsonl')
     valid=[]
     for job in jobs:
