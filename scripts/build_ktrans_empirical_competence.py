@@ -13,6 +13,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from scripts.diagnose_k4_profiles import load_model
 from scripts.run_ktrans_k5a import extract_outputs
 from scripts.run_ktrans_k7d import validate_manifest
+from urban_transfer.ktrans_source_coverage import validate_full_source_manifest
 from scripts.cache_ktrans_k7d import merge_records
 from urban_transfer.ktrans_empirical_competence import (
     identity,manifest_source_index,validate_inner_fold,
@@ -67,6 +68,8 @@ def main():
     for name in ('checkpoint','k5a-protocol','manifest','knowledge-cache','output'):
         parser.add_argument('--'+name,required=True,type=Path)
     parser.add_argument('--reuse-cache',type=Path,default=Path('runs/k7b_pilot/evidence.jsonl'))
+    parser.add_argument('--extra-reuse-cache',type=Path,action='append',default=[],
+                        help='Additional pre-existing VLM cache files')
     parser.add_argument('--model',default='Qwen/Qwen3-VL-8B-Instruct')
     parser.add_argument('--max-pixels',type=int,default=262144)
     parser.add_argument('--batch-size',type=int,default=512)
@@ -79,7 +82,10 @@ def main():
     manifest=json.loads(a.manifest.read_text())
     outer,ds,splits,bank,_=load_model(a.checkpoint,a.feature_dir,
                                       a.text_cache_dir,a.image_root)
-    validate_manifest(manifest,ds,splits,outer,a.checkpoint)
+    if manifest.get('source_manifest_mode')=='outer-train-full-v1':
+        validate_full_source_manifest(manifest,ds,splits,outer,a.checkpoint)
+    else:
+        validate_manifest(manifest,ds,splits,outer,a.checkpoint)
     sources=list(bank.source_tasks)
     target=outer['heldout_task']
     if Path(info['outer_checkpoint']).resolve()!=a.checkpoint.resolve() or (
@@ -101,7 +107,7 @@ def main():
     if not set(outer_manifest).issubset(outer_train_keys):
         raise ValueError('VLM outer train manifest contains rows outside checkpoint OUTER TRAIN')
     vlm=validated_vlm_jobs(manifest,
-                          merge_records([a.reuse_cache,a.knowledge_cache]),
+                          merge_records([a.reuse_cache,*a.extra_reuse_cache,a.knowledge_cache]),
                           a.model,a.max_pixels)
     all_rows=[];reports=[];folds={}
     for pseudo in sources:
@@ -130,6 +136,7 @@ def main():
        'k4_checkpoint_for_provenance_only':str(a.checkpoint.resolve()),
        'k5a_protocol':str(a.k5a_protocol.resolve()),
        'manifest':str(a.manifest.resolve()),
+       'source_manifest_mode':manifest.get('source_manifest_mode','sampled-k7d'),
        'folds':folds,'n_expert_rows':len(all_rows),
        'inner_partitions':list(INNER_SPLITS),
        'spatial_label_mode':'log1p source pseudo-task labels',

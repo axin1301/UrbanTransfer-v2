@@ -67,7 +67,12 @@ def merge_records(paths):
     return records
 
 def get_pending(jobs,records):
-    return [j for j in jobs if not (j['key'] in records and records[j['key']].get('parsed') is not None)]
+    def valid(job):
+        row=records.get(job['key'])
+        return bool(row and row.get('parsed') is not None and all(
+            row.get(k)==job[k] for k in
+            ('version','tile_id','task','condition','model','max_pixels','prompt')))
+    return [j for j in jobs if not valid(j)]
 
 def messages_for(job):
     system=(IMAGE_ONLY_SYSTEM if job['condition']=='image_only' else
@@ -97,6 +102,8 @@ def main():
     p.add_argument('--manifest',required=True,type=Path)
     p.add_argument('--output',type=Path,default=Path('runs/k7d/evidence.jsonl'))
     p.add_argument('--reuse-cache',type=Path,default=Path('runs/k7b_pilot/evidence.jsonl'))
+    p.add_argument('--extra-reuse-cache',type=Path,action='append',default=[],
+                   help='Additional read-only JSONL knowledge caches; repeatable')
     p.add_argument('--model',default=MODEL)
     p.add_argument('--max-pixels',type=int,default=262144)
     p.add_argument('--max-new-tokens',type=int,default=440)
@@ -116,7 +123,7 @@ def main():
         p.error('Unknown cache condition')
     jobs=[j for j in unique_jobs(manifest,args.model,args.max_pixels)
           if j['condition'] in conditions]
-    sources=[args.reuse_cache,args.output] if args.reuse_cache!=args.output else [args.output]
+    sources=list(dict.fromkeys([args.reuse_cache,*args.extra_reuse_cache,args.output]))
     records=merge_records(sources)
     pending=get_pending(jobs,records)
     print(f'[k7d-cache] total={len(jobs)} cached_valid={len(jobs)-len(pending)} '
