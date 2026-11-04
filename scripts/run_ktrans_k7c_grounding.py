@@ -152,30 +152,39 @@ def main():
     model=Qwen3VLForConditionalGeneration.from_pretrained(args.model,dtype=torch.bfloat16,
           device_map='auto',attn_implementation='sdpa',low_cpu_mem_usage=True).eval()
     args.output.parent.mkdir(parents=True,exist_ok=True)
-    for count,(key,tile,task,condition,sentence) in enumerate(pending,1):
-        with Image.open(tile['image_path']) as image:
-            altered=transform_image(image,condition,tile['tile_id'])
-            messages=[
-              {'role':'system','content':[{'type':'text','text':SYSTEM}]},
-              {'role':'user','content':[{'type':'image','image':altered},
-                                       {'type':'text','text':sentence}]}]
-            inputs=processor.apply_chat_template(messages,tokenize=True,
-                        add_generation_prompt=True,return_dict=True,
-                        return_tensors='pt').to(model.device)
-        with torch.inference_mode():
-            tokens=model.generate(**inputs,max_new_tokens=args.max_new_tokens,do_sample=False)
-        raw=processor.decode(tokens[0,inputs['input_ids'].shape[1]:],skip_special_tokens=True).strip()
-        parsed=parse(raw,'image_task')
-        record={'key':key,'version':VERSION,'tile_id':tile['tile_id'],
-          'city':tile['city'],'image_path':tile['image_path'],
-          'image_name':tile['image_name'],'task':task,'condition':condition,
-          'model':args.model,'max_pixels':args.max_pixels,'prompt':sentence,
-          'system_prompt':SYSTEM,'raw':raw,'parsed':parsed}
+    processor.tokenizer.padding_side='left'
+    cursor=0
+    active_batch=args.batch_size
+    t0=time.monotonic()
+    while cursor<len(pending):
+        batch=pending[cursor:cursor+active_batch]
+        try:
+            raws=run_batch(model,processor,batch,args.max_new_tokens)
+        except (RuntimeError,torch.OutOfMemoryError) as exc:
+            if not is_oom(exc) or len(batch)==1:
+                raise
+            active_batch=max(1,len(batch)//2)
+            torch.cuda.empty_cache()
+            print(f'[k7c] OOM retry batch_size={active_batch}',flush=True)
+            continue
+        if len(raws)!=len(batch):
+            raise AssertionError('Batch outputs do not align with inputs')
         with args.output.open('a') as out:
-            out.write(json.dumps(record,ensure_ascii=False)+'\n')
-            out.flush();os.fsync(out.fileno())
-        print(f'[k7c] {count}/{len(pending)} {tile["city"]} {task} '
-              f'{condition} json={"OK" if parsed else "INVALID"}',flush=True)
+            for (key,tile,task,condition,sentence),raw in zip(batch,raws):
+                parsed=parse(raw,'image_task')
+                record={'key':key,'version':VERSION,'tile_id':tile['tile_id'],
+                  'city':tile['city'],'image_path':tile['image_path'],
+                  'image_name':tile['image_name'],'task':task,'condition':condition,
+                  'model':args.model,'max_pixels':args.max_pixels,'prompt':sentence,
+                  'system_prompt':SYSTEM,'raw':raw,'parsed':parsed}
+                out.write(json.dumps(record,ensure_ascii=False)+'\n')
+                print(f'[k7c] {cursor+1}/{len(pending)} {tile["city"]} {task} '
+                      f'{condition} json={"OK" if parsed else "INVALID"}',flush=True)
+                cursor+=1
+            out.flush()
+            os.fsync(out.fileno())
+        print(f'[k7c] batch={len(batch)} progress={cursor}/{len(pending)} '
+              f'elapsed_s={time.monotonic()-t0:.1f}',flush=True)
     print('[k7c] saved',args.output,flush=True)
 
 if __name__=='__main__':main()
