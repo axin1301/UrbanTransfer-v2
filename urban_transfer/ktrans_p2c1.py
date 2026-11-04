@@ -91,28 +91,32 @@ def task_pair_structure(names,tensor,masks,task_vectors=None):
     return comparisons
 
 def rank_structure(names,tensor,masks,split='meta_SCUI'):
-    """SVD of observed complete rectangular submatrices only.
+    """Masked low-rank diagnostics on complete 3-task × 2-expert blocks.
 
-    Missing pseudo-own expert blocks preclude a full 5×30 SVD.
-    For each pair of pseudo tasks, use common named experts (3×6)
-    and only cues observed for both rows. Report descriptive
-    low-rank energy, NOT a heldout-task generalization estimate.
+    In a five-source-task LOTO bank, a triplet of heldout tasks has
+    exactly two named experts present in every fold. Use observed
+    cue coordinates shared by ALL THREE tasks; no diagonal imputation.
+    This is descriptive rank energy, not a fitted transfer result.
     """
     a=tensor[split];m=masks[split]
     results=[]
-    for i,j in combinations(range(len(names)),2):
-        experts=[k for k in range(len(names)) if k not in (i,j)]
-        entries=np.array([a[i,experts,:].reshape(-1),a[j,experts,:].reshape(-1)])
-        good=np.array([m[i,experts,:].reshape(-1),m[j,experts,:].reshape(-1)]).all(0)
-        x=entries[:,good]
+    for indices in combinations(range(len(names)),3):
+        experts=[k for k in range(len(names)) if k not in indices]
+        entries=np.stack([a[i,experts,:].reshape(-1) for i in indices])
+        shared=np.stack([m[i,experts,:].reshape(-1) for i in indices]).all(0)
+        x=entries[:,shared]
         if x.shape[1]<2:singular=np.array([])
         else:singular=np.linalg.svd(x,full_matrices=False,compute_uv=False)
         energy=(singular**2)/np.sum(singular**2) if len(singular) and np.sum(singular**2)>1e-12 else np.array([])
-        results.append({'inner_partition':split,'task_a':names[i],
-            'task_b':names[j],'n_common_entries':int(good.sum()),
+        results.append({'inner_partition':split,
+            'task_a':names[indices[0]],'task_b':names[indices[1]],
+            'task_c':names[indices[2]],
+            'n_common_named_experts':len(experts),
+            'n_common_entries':int(shared.sum()),
             'rank1_energy_fraction':float(energy[0]) if len(energy) else float('nan'),
+            'rank2_energy_fraction':float(energy[:2].sum()) if len(energy) else float('nan'),
             'n_available_singular_values':len(singular),
-            'warning':'Two-task complete block only; rank1 energy is descriptive, NOT full-tensor low-rank proof'})
+            'warning':'Three-task complete block only; energy is descriptive and not full-tensor low-rank proof'})
     return results
 
 def task_semantic_association(rows):
