@@ -24,6 +24,8 @@ def encode_record(parsed,mode):
     values=[];masks=[]
     for field in fields:
         table=parsed.get(field)
+        if mode=='image_only' and field=='evidence_relevance' and table is None:
+            table={cue:None for cue in CUES}
         if not isinstance(table,dict):raise ValueError('Missing VLM evidence field: '+field)
         for cue in CUES:
             val=table.get(cue)
