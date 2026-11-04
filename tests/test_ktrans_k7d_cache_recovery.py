@@ -73,7 +73,7 @@ class K7DCacheRecoveryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path=Path(tmp)/'evidence.jsonl'
             row={**self.job,'raw':json.dumps(raw),'parsed':None}
-            path.write_text(json.dumps(row)+'\\n')
+            path.write_text(json.dumps(row)+'\n')
             add,audit,counts,total=recover(self.manifest,path,Path(tmp)/'none',
                                              'test-model',262144)
             self.assertEqual(total,1)
