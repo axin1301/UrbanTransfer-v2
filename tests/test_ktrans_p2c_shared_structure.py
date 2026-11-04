@@ -92,16 +92,14 @@ class P2CSharingTests(unittest.TestCase):
             self.assertEqual(len(folds),5)
             self.assertEqual(len(pairs),30)
             self.assertEqual(len(shared),10)
-            # A named expert can move between fold-local expert indices:
-            # e.g., expert "c" is index 1 in fold "a", index 1 in
-            # fold "b"; expert "b" is unavailable in fold "b".
-            # Compare both sides explicitly using the SAME name.
+            # Named expert "b" moves from local index 0 in fold "a"
+            # to local index 1 in fold "c". Compare by name, not index.
             from urban_transfer.ktrans_p2c2 import compare_vectors
             actual=next(row for row in pairs if
-                        row['pseudo_a']=='a' and row['pseudo_b']=='b'
-                        and row['named_expert']=='c')
-            expected=compare_vectors(tensors_for_expert(c['a'],'c'),
-                                     tensors_for_expert(c['b'],'c'))
+                        row['pseudo_a']=='a' and row['pseudo_b']=='c'
+                        and row['named_expert']=='b')
+            expected=compare_vectors(tensors_for_expert(c['a'],'b'),
+                                     tensors_for_expert(c['c'],'b'))
             self.assertEqual(actual['n_parameters'],expected['n_parameters'])
             self.assertAlmostEqual(actual['relative_l2_parameter_shift'],
                                    expected['relative_l2_parameter_shift'])
