@@ -129,6 +129,7 @@ def main():
         if missing and args.preflight:
             run_command(common+['--conditions','image_only',
                                 '--max-new-jobs',str(args.preflight)],log)
+            repair_existing()  # accept only audited, complete visual fields
             total,remaining,samples=cache_quality(args.manifest,cache,args.reuse_cache,
                 args.model,args.max_pixels,'image_only')
             # The preflight jobs are deterministic first N uncached image-only identities.
