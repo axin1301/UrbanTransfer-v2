@@ -78,7 +78,8 @@ class P2CSharingTests(unittest.TestCase):
         self.assertTrue(all(r['n_effect_entries_shared']==3 for r in similarity))
         low=rank_structure(names,tensor,mask)
         self.assertEqual(len(low),10)
-        self.assertTrue(all(r['n_common_entries']==3 for r in low))
+        self.assertTrue(all(r['n_common_named_experts']==2 for r in low))
+        self.assertTrue(all(r['n_common_entries']==2 for r in low))
         self.assertEqual(task_semantic_association(similarity[:10])['n_pairs'],10)
 
     def test_inner_model_provenance_and_weight_identity(self):
