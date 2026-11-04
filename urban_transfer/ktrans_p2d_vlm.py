@@ -195,3 +195,32 @@ def summarize_same_task(rows):
             'macro_pairwise_accuracy':float(np.mean([r['pairwise_accuracy'] for r in vals])),
             'macro_mse_ratio_to_uniform':float(np.nanmean([r['soft_mix_mse_ratio_to_uniform'] for r in vals]))})
     return task_rows,summaries
+
+def vlm_signal_audit(samples,task_text):
+    """Task/split VLM relevance variability and genuine image-specific residuals.
+
+    If conditional relevance is nearly constant or always equal to the
+    text-only prior, a cross-task router cannot learn useful per-region
+    distinctions from this six-cue channel.
+    """
+    groups=defaultdict(list)
+    for s in samples:groups[s['task'],s['split']].append(s)
+    rows=[]
+    for (task,split),group in sorted(groups.items()):
+        for cue in range(6):
+            observed=[];deltas=[]
+            for s in group:
+                _,rel,_,_,delta,prior,masks=vlm_components(s,task_text)
+                if masks[1,cue]:
+                    observed.append(float(rel[cue]))
+                    deltas.append(float(delta[cue]))
+            arr=np.asarray(observed,dtype=float)
+            d=np.asarray(deltas,dtype=float)
+            rows.append({'pseudo_task':task,'inner_partition':split,
+                'cue_index':cue,'n_tiles':len(group),
+                'n_relevance_observed':len(arr),
+                'n_unique_relevance_scores':len(set(arr.tolist())),
+                'relevance_variance':float(np.var(arr)) if len(arr) else float('nan'),
+                'mean_abs_image_task_minus_text_only':float(np.mean(np.abs(d))) if len(d) else float('nan'),
+                'fraction_equal_to_text_only_prior':float(np.mean(np.abs(d)<1e-12)) if len(d) else float('nan')})
+    return rows
