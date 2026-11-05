@@ -99,12 +99,17 @@ unchanged. The output folder must **not exist** at launch. Reports:
 - `runs/k7/m62_fixed_baselines_seed42/metrics.csv`
 - `runs/k7/m62_fixed_baselines_seed42/config.json`
 
-The script reports **all three splits** SCUI, UCSI and UCUI
+The script reports **all three splits** SCUI, UCSI and UCUI,
+plus `UCSI_population` and `UCSI_food` separately for every model,
 in exactly the same units: MSE and MAE in log1p, Pearson, and MSE
 ratio to source-only constant mean baseline. For UCSI this ratio
 uses the matching **source task's** train-only mean, not the
 Education target mean. This is essential because UCSI contains
 two known source tasks with different label scales.
+
+The comparison verifies the frozen M6.2 checkpoint reproduces its
+original SCUI/UCUI MSE within numerical tolerance and fails loudly
+on cache/normalization mismatch.
 
 This initial fixed protocol uses only a small 128 source train
 sample; it should not be compared numerically to large M1–M5
