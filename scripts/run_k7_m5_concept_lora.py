@@ -23,7 +23,6 @@ from scripts.audit_k7_m2_text import generic_embeddings,relation_conditions
 from scripts.run_z1_pilot import calibrated_moments,scores
 from urban_transfer.data_m1 import stratified_sample
 from urban_transfer.k7_feature_cache import read_tensor_cache
-from urban_transfer.k7_lora_composer import RelationLoRAComposer
 from urban_transfer.k7_m1_knowledge import TRAIN_TASKS,HELDOUT_TASK
 from urban_transfer.ktrans_text import qwen_task_vectors
 from urban_transfer.k7_concept_lora import (ConceptLoRAComposer, rank_targets,
@@ -203,7 +202,7 @@ def main():
             total+=float(loss.detach().cpu())
             steps+=1
         if epoch==0 or epoch+1==a.epochs or (epoch+1)%5==0:
-            print(f"[k7-m4] epoch={epoch+1}/{a.epochs} total_loss={total/max(steps,1):.3f}",
+            print(f"[k7-m5] epoch={epoch+1}/{a.epochs} total_loss={total/max(steps,1):.3f}",
                   flush=True)
     model.eval()
     correct,flag=tokens[HELDOUT_TASK]
@@ -212,7 +211,7 @@ def main():
     edge_choices=relation_conditions(correct,generic_tensor)
     results=[]
     for part,indices in (("SCUI",scui),("UCUI",ucui)):
-        print(f"[k7-m4] {part} inference n={len(indices)}",flush=True)
+        print(f"[k7-m5] {part} inference n={len(indices)}",flush=True)
         original=None
         actual=y[indices].numpy()
         for condition,relation in edge_choices.items():
@@ -241,8 +240,8 @@ def main():
         **{k:str(v) if isinstance(v,Path) else v for k,v in vars(a).items()},
         "source_tasks":TRAIN_TASKS,"heldout_task":HELDOUT_TASK,
         "heldout_cities":held,"n_train":len(train_ids),
-        "target_policy":"Education text used for training KD; no Education labels or images in optimizer",
-        "teacher_rank_probs":[[float(v) for v in row] for row in teacher.detach().cpu()],
+        "target_policy":"Education text used for rank KD; source-only RemoteCLIP concept grounding; no Education labels or images in optimizer",
+        "teacher_concept_rank_probs":[[float(v) for v in row] for row in teacher.detach().cpu()],
         "concept_names":["residential","settlement","roads","commercial"]
     },indent=2))
     print(f"{'Split':5} {'Text':9} {'MSE':>7} {'Pearson':>8} {'Ratio':>7} "
@@ -252,7 +251,7 @@ def main():
               f"{r['mse_log1p']:7.3f} {r['pearson']:8.3f} {r['ratio']:7.3f} "
               f"{r['population_attention']:7.3f} "
               f"{r['food_attention']:7.3f}",flush=True)
-    print(f"[k7-m4] COMPLETE {a.output} (one concept-KD model; three inference texts)",flush=True)
+    print(f"[k7-m5] COMPLETE {a.output} (one concept-KD model; three inference texts)",flush=True)
 
 
 if __name__=="__main__":
