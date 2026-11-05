@@ -116,3 +116,28 @@ def fold_relations(embeddings, held_task, all_tasks, seed=42, shuffle=False):
                 for i, task in enumerate(eligible)}
     shuffled[held_task] = answer[eligible[0]]
     return shuffled
+
+
+class RelationRegressor(torch.nn.Module):
+    """Inject Qwen pairwise-relation messages into a shared zero-shot regressor.
+
+    The relation message is fused BEFORE semantic FiLM / generated head;
+    it is not a posthoc ensemble weight or supervised expert score.
+    """
+    def __init__(self, visual_dim, semantic_dim, mode="b3", hidden=128, rank=16):
+        super().__init__()
+        from urban_transfer.z1_model import Z1Regressor
+        self.project = torch.nn.Sequential(
+            torch.nn.LayerNorm(semantic_dim),
+            torch.nn.Linear(semantic_dim, semantic_dim),
+            torch.nn.Tanh())
+        self.strength = torch.nn.Parameter(torch.tensor(0.20))
+        self.predictor = Z1Regressor(visual_dim, semantic_dim, mode, hidden, rank)
+
+    def forward(self, images, context, semantics, relations):
+        if relations.shape != semantics.shape:
+            raise ValueError("Relation vectors must match semantic embeddings")
+        fused = F.normalize(
+            semantics.float() + self.strength * self.project(relations.float()),
+            dim=-1)
+        return self.predictor(images, context, fused)
