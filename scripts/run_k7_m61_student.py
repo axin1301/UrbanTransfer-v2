@@ -66,7 +66,7 @@ def main():
     if not torch.cuda.is_available():
         raise RuntimeError("M6.1 student requires MI250/ROCm GPU")
     if a.seed!=42 or a.epochs<1 or a.batch_size<1 or a.target_align_weight<=0 or a.self_loss<0:
-        p.error("Fixed seed42, positive budget and KD strength required")
+        p.error("Fixed seed42, positive budget and alignment strength required")
     if (a.run_dir/"model.pt").exists() or (a.run_dir/"metrics.csv").exists():
         raise FileExistsError("M6.1 training results already exist; do not overwrite")
     manifest_path=a.run_dir/"manifest.json"
@@ -89,7 +89,7 @@ def main():
             np.all(tasks[scui]==HELDOUT_TASK) and
             np.all(tasks[ucui]==HELDOUT_TASK) and
             not unseen[scui].any() and unseen[ucui].all()):
-        raise ValueError("M6 manifest violates source-only target holdout policy")
+        raise ValueError("M6.1 manifest violates source-only target holdout policy")
     ds=ImageUrbanDataset(manifest["source_csv"],manifest["image_root"],
                          partition="eval")
     if (len(ds.df)!=len(frame) or
@@ -155,7 +155,7 @@ def main():
             # meaningful independent specialization, with no main mask.
             source_pred=model.source_expert_predictions(
                 visual[j],context[j],source_h[j])
-            direct=source_pred.gather(1,source_indices[j,None]).squeeze(1)
+            direct=source_pred.gather(1,source_indices[j].unsqueeze(1)).squeeze(1)
             self_loss=F.mse_loss(direct,targets[j])
             # Education definition participates in training on SOURCE tiles;
             # frozen RemoteCLIP image features act as image-only anchors.
@@ -169,7 +169,7 @@ def main():
             total+=float(loss.detach().cpu())
             steps+=1
         if epoch==0 or epoch+1==a.epochs or (epoch+1)%5==0:
-            print(f"[k7-m6] epoch={epoch+1}/{a.epochs} "
+            print(f"[k7-m61] epoch={epoch+1}/{a.epochs} "
                   f"loss={total/max(steps,1):.3f}",flush=True)
     model.eval()
     results=[]
@@ -209,12 +209,12 @@ def main():
         "group_counts":manifest["group_counts"]
     },indent=2))
     for row in results:
-        print(f"[k7-m6] {row['partition']} MSE={row['mse_log1p']:.3f} "
+        print(f"[k7-m61] {row['partition']} MSE={row['mse_log1p']:.3f} "
               f"Pearson={row['pearson']:.3f} "
               f"Ratio={row['relative_mse_to_source_mean']:.3f} "
               f"PopWt={row['population_weight']:.3f} "
               f"FoodWt={row['food_weight']:.3f}",flush=True)
-    print(f"[k7-m6] COMPLETE {a.run_dir}",flush=True)
+    print(f"[k7-m61] COMPLETE {a.run_dir}",flush=True)
 
 
 if __name__=="__main__":
