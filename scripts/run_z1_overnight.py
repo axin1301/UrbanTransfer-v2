@@ -12,6 +12,7 @@ import sys
 import time
 import traceback
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import numpy as np
 from tqdm.auto import tqdm
@@ -99,6 +100,12 @@ def summarize(a, jobs, status):
 
 
 def run(a):
+    if not a.source_csv.is_file():
+        raise FileNotFoundError("Source CSV not found: " + str(a.source_csv))
+    if not a.image_root.is_dir():
+        raise FileNotFoundError("Image root not found: " + str(a.image_root))
+    if not (a.feature_dir/"remoteclip_features.sqlite3").is_file():
+        raise FileNotFoundError("RemoteCLIP SQLite cache not found under: " + str(a.feature_dir))
     a.output.mkdir(parents=True, exist_ok=True)
     jobs = [(variant, seed, a.output/f"{variant}_seed{seed}")
             for seed in a.seeds for variant in a.variants]
