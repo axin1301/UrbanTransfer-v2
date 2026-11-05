@@ -309,13 +309,40 @@ def main():
                        stats,target_stats,embeddings,device,
                        hidden_cache=hidden_cache)
         result.append(row)
-    # Match existing preprinted M6.2 figures within rounding when
-    # evaluating SCUI/UCUI with this exact checkpoint.
+    # Separate Population/Food UCSI: pooled source-task MSE alone
+    # can conceal a failure of one source expert or its source scale.
+    for variant,model in (("visual_only",None),("text_router",None),
+                          ("m62",m62)):
+        if variant!="m62":
+            dim=0 if variant=="visual_only" else embedding_dim
+            model=TwoExpertControl(x.shape[-1],text_dim=dim,hidden=a.hidden)
+            model.load_state_dict(trained[variant],strict=True)
+            model=model.to(device).eval()
+        for source in TRAIN_TASKS:
+            partition=("UCSI_population" if source==TRAIN_TASKS[0]
+                       else "UCSI_food")
+            portion=np.asarray([int(i) for i in ids["UCSI"]
+                                if names[int(i)]==source],dtype=np.int64)
+            if len(portion)<2:
+                raise ValueError("Insufficient held-city UCSI per source task")
+            result.append(eval_split(
+                variant,model,partition,portion,x,ctx,y,names,
+                stats,target_stats,embeddings,device,
+                hidden_cache=hidden_cache if variant=="m62" else None))
+    # Check exact SCUI/UCUI M6.2 checkpoint parity against its original
+    # frozen metrics, within float formatting/tensor roundoff tolerance.
+    with (a.m62_dir/"metrics.csv").open(newline="") as original_file:
+        prior={line["partition"]:line for line in csv.DictReader(original_file)}
     for split in ("SCUI","UCUI"):
         row=next(r for r in result
                  if r["model"]=="m62" and r["partition"]==split)
-        if not np.isfinite(row["mse_log1p"]):
-            raise ValueError("Frozen M6.2 evaluation is nonfinite")
+        if split not in prior:
+            raise ValueError("Original M6.2 metrics lack "+split)
+        previous=float(prior[split]["mse_log1p"])
+        if not np.isclose(row["mse_log1p"],previous,atol=2e-4,rtol=2e-4):
+            raise RuntimeError(
+                f"Frozen M6.2 {split} MSE parity failed: "
+                f"recomputed={row['mse_log1p']}, saved={previous}")
     a.output.mkdir(parents=True,exist_ok=False)
     for variant,weights in trained.items():
         torch.save({"model":weights,"variant":variant,
