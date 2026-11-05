@@ -7,6 +7,7 @@ import argparse
 import csv
 import hashlib
 import json
+import os
 import random
 from pathlib import Path
 import sys
@@ -25,6 +26,7 @@ from urban_transfer.m3_features import CachedFeatureDataset, FeatureStore
 from urban_transfer.protocol import SOURCE_TASKS
 from urban_transfer.z1_model import Z1Regressor
 from urban_transfer.k7_hyper import K7HyperRegressor
+from urban_transfer.k7_feature_cache import read_tensor_cache
 from urban_transfer.z1_relation import RelationRegressor, fold_relations, relation_embeddings
 
 VARIANTS = ("k7_e1", "k7_e2", "k7_e2_shuffle")
@@ -38,19 +40,18 @@ def get_semantics(a):
 
 
 def load_data(a):
-    cache = a.feature_dir/"remoteclip_features.sqlite3"
-    if not cache.is_file():
-        raise FileNotFoundError(f"Frozen RemoteCLIP feature cache missing: {cache}")
-    store = FeatureStore(a.feature_dir, encoder_id="RemoteCLIP-" + a.remoteclip_model)
-    ds = CachedFeatureDataset(a.source_csv, a.image_root, store,
-                              partition="eval", image_column=a.image_column,
-                              seed=a.seed)
-    if set(ds.df.indicator_column) != set(SOURCE_TASKS):
-        raise ValueError("Source CSV must contain exactly six source indicators")
-    if ds.df.city.astype(str).nunique() < 3:
-        raise ValueError("At least three source cities required")
-    x, context, y, names = tensorize(ds, {})
-    return ds.df, x, context, y, names
+    shared = os.environ.get("K7_SHARED_TENSOR_CACHE")
+    if shared:
+        print(f"[k7] reading shared tensor cache {shared}", flush=True)
+        return read_tensor_cache(shared, a.source_csv, a.image_root,
+                                 a.feature_dir, a.remoteclip_model, a.image_column)
+    # Standalone invocations remain supported, with visible loading progress.
+    from urban_transfer.k7_feature_cache import build_tensor_cache
+    fallback = a.output.parent / "_k7_source_tensors.pt"
+    build_tensor_cache(a.source_csv, a.image_root, a.feature_dir,
+                       a.remoteclip_model, fallback, a.image_column)
+    return read_tensor_cache(fallback, a.source_csv, a.image_root,
+                             a.feature_dir, a.remoteclip_model, a.image_column)
 
 
 def diagnostic(predicted, truth):
@@ -81,35 +82,66 @@ def fold_run(a, task, frame, x, context, y, names, semantics, relation):
     stats, unseen = calibrated_moments(
         frame.iloc[splits["train"]], semantics, task, a.scale_temperature)
     train_idx = splits["train"]
-    train_mean = torch.tensor([stats[names[i]][0] for i in train_idx])
-    train_std = torch.tensor([stats[names[i]][1] for i in train_idx])
+    train_mean = torch.tensor([stats[names[i]][0] for i in train_idx],
+                              dtype=torch.float32)
+    train_std = torch.tensor([stats[names[i]][1] for i in train_idx],
+                             dtype=torch.float32)
     target = (y[train_idx] - train_mean) / train_std
-    sv = torch.stack([semantics[n] for n in names])
+    sv = torch.stack([semantics[n].float() for n in names])
     use_relation = a.variant != "k7_e1"
     rv = None
     if use_relation:
         rf = fold_relations(relation, task, SOURCE_TASKS, semantics,
                             shuffle=a.variant.endswith("_shuffle"))
-        rv = torch.stack([rf[n] for n in names])
-        dataset = TensorDataset(x[train_idx], context[train_idx],
-                                sv[train_idx], rv[train_idx], target)
-    else:
-        dataset = TensorDataset(x[train_idx], context[train_idx],
-                                sv[train_idx], target)
+        rv = torch.stack([rf[n].float() for n in names])
     torch.manual_seed(a.seed)
     device = torch.device("cpu" if a.cpu or not torch.cuda.is_available() else "cuda")
     model = K7HyperRegressor(x.shape[1], sv.shape[1], hidden=a.hidden,
                              rank=a.rank, use_relation=use_relation).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=a.lr, weight_decay=1e-4)
-    loader = DataLoader(dataset, batch_size=a.batch_size, shuffle=True,
-                        generator=torch.Generator().manual_seed(a.seed))
+    # Transfer fold tensors once when GPU memory allows; otherwise stream
+    # pinned CPU batches rather than silently falling back to CPU training.
+    raw = (x, context, sv) + ((rv,) if use_relation else ())
+    total_bytes = sum(t.numel()*t.element_size() for t in raw)
+    reserve_bytes = max(2*1024**3, total_bytes*2)
+    can_reside = device.type == "cuda" and (
+        torch.cuda.mem_get_info()[0] > total_bytes + reserve_bytes)
+    if can_reside:
+        try:
+            all_features = tuple(t.to(device) for t in raw)
+            train_indices = torch.as_tensor(train_idx, dtype=torch.long, device=device)
+            train_labels = target.to(device)
+            print(f"[k7] device={torch.cuda.get_device_name(0)} "
+                  f"resident=GPU feature_memory={total_bytes/1024**3:.3f}GiB "
+                  f"train_rows={len(train_idx)}", flush=True)
+        except torch.cuda.OutOfMemoryError:
+            torch.cuda.empty_cache()
+            can_reside = False
+    if not can_reside:
+        all_features = raw
+        train_indices = torch.as_tensor(train_idx, dtype=torch.long)
+        train_labels = target
+        print(f"[k7] device={device} resident=CPU "
+              f"streaming_batches_to_GPU={device.type=='cuda'} "
+              f"feature_memory={total_bytes/1024**3:.3f}GiB", flush=True)
+    generator = torch.Generator(device="cpu").manual_seed(a.seed)
     outer = tqdm(range(a.epochs), desc=f"K7 {a.variant} {task[:17]}", leave=False,
                  dynamic_ncols=True)
     for epoch in outer:
         model.train()
         total = 0.0
-        for samples in loader:
-            *features, labels = [z.to(device) for z in samples]
+        count = 0
+        order = torch.randperm(len(train_idx), generator=generator)
+        if can_reside:
+            order = order.to(device)
+        for start in range(0, len(train_idx), a.batch_size):
+            sample_ids = order[start:start+a.batch_size]
+            global_ids = train_indices[sample_ids]
+            features = [t[global_ids] for t in all_features]
+            labels = train_labels[sample_ids]
+            if not can_reside:
+                features = [t.to(device, non_blocking=True) for t in features]
+                labels = labels.to(device, non_blocking=True)
             optimizer.zero_grad(set_to_none=True)
             prediction = model(*features)
             loss = F.mse_loss(prediction, labels)
@@ -117,7 +149,8 @@ def fold_run(a, task, frame, x, context, y, names, semantics, relation):
             torch.nn.utils.clip_grad_norm_(model.parameters(), 2.0)
             optimizer.step()
             total += float(loss.detach().cpu())
-        outer.set_postfix(loss=f"{total / max(len(loader),1):.3f}")
+            count += 1
+        outer.set_postfix(loss=f"{total/max(count,1):.3f}")
     model.eval()
     records = []
     for partition in ("SCUI", "UCSI", "UCUI"):
@@ -126,9 +159,11 @@ def fold_run(a, task, frame, x, context, y, names, semantics, relation):
         with torch.inference_mode():
             for start in range(0, len(idx), a.batch_size):
                 j = idx[start:start+a.batch_size]
-                features = [x[j].to(device), context[j].to(device), sv[j].to(device)]
-                if use_relation:
-                    features.append(rv[j].to(device))
+                ids = torch.as_tensor(j, dtype=torch.long,
+                                      device=device if can_reside else "cpu")
+                features = [t[ids] for t in all_features]
+                if not can_reside:
+                    features = [t.to(device) for t in features]
                 chunks.append(model(*features).cpu())
         standardized = torch.cat(chunks).numpy()
         mean = np.asarray([
@@ -210,6 +245,8 @@ def main():
     relations = (relation_embeddings(a.relation_cache_dir, a.text_model)
                  if a.variant != "k7_e1" else None)
     frame, x, context, y, names = load_data(a)
+    print(f"[k7] data ready rows={len(frame)} visual_dim={x.shape[1]} "
+          f"GPU={torch.cuda.is_available() and not a.cpu}", flush=True)
     tasks = sorted(SOURCE_TASKS)
     completed = []
     progress = tqdm(tasks, desc=f"K7 {a.variant} seed={a.seed}",
@@ -244,7 +281,7 @@ def main():
                 r["relative_mse_to_source_mean"] for r in sub])),
         })
     csv_write(a.output/"macro_metrics.csv", macro)
-    print(f"[z1-rel] COMPLETE variant={a.variant} seed={a.seed} {a.output}",
+    print(f"[k7] COMPLETE variant={a.variant} seed={a.seed} {a.output}",
           flush=True)
 
 
