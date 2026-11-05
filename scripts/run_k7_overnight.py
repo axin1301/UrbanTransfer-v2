@@ -18,6 +18,7 @@ import numpy as np
 from tqdm.auto import tqdm
 
 from scripts.run_k7_pilot import VARIANTS
+from urban_transfer.k7_feature_cache import build_tensor_cache
 
 
 def prepare_caches(a):
@@ -108,6 +109,12 @@ def run(a):
             for seed in a.seeds for variant in a.variants]
     if not a.skip_prepare:
         prepare_caches(a)
+    # Build once for ALL experiments, avoiding thousands of redundant SQLite
+    # feature lookups. Reuse same cache on resume without modifying fold configs.
+    shared = a.output/"_source_tensors.pt"
+    build_tensor_cache(a.source_csv, a.image_root, a.feature_dir,
+                       a.remoteclip_model, shared, a.image_column)
+    print(f"[k7-night] shared frozen tensors ready: {shared}", flush=True)
     status = []
     failed = False
     progress = tqdm(jobs, desc="K7 hypernetwork sweep", dynamic_ncols=True)
@@ -136,16 +143,27 @@ def run(a):
         with log.open("a") as f:
             f.write("\n==== K7 RUN: "+json.dumps(cmd)+" ====\n")
             f.flush()
-            result = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT,
-                                    cwd=Path(__file__).resolve().parents[1],
-                                    check=False)
-        if result.returncode:
-            state = f"FAILED exit={result.returncode}"
+            env = os.environ.copy()
+            env["K7_SHARED_TENSOR_CACHE"] = str(shared.resolve())
+            # Stream internal Epoch progress rather than leaving the outer
+            # progress bar apparently stuck at 0% for the entire first run.
+            with subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                                  stderr=subprocess.STDOUT, text=True,
+                                  bufsize=1, env=env,
+                                  cwd=Path(__file__).resolve().parents[1]) as proc:
+                for line in proc.stdout:
+                    f.write(line)
+                    f.flush()
+                    sys.stdout.write(line)
+                    sys.stdout.flush()
+                returncode = proc.wait()
+        if returncode:
+            state = f"FAILED exit={returncode}"
             failed = True
             print(f"[k7-night] {state}: {variant} seed={seed}; {log}", flush=True)
             # Continue independent experiments so one failure does not erase the night.
         else:
-            print(f"[z1-night] OK {variant} seed={seed}", flush=True)
+            print(f"[k7-night] OK {variant} seed={seed}", flush=True)
         status.append({"variant": variant, "seed": seed, "state": state,
                        "log": str(log)})
         summarize(a, jobs, status)
