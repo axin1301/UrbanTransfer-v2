@@ -24,7 +24,8 @@ class RelationLoRAComposer(nn.Module):
             nn.Linear(semantic_dim*3+1,hidden),nn.GELU(),
             nn.Linear(hidden,hidden),nn.GELU())
         self.rank_gate = nn.Linear(hidden,rank)
-        self.router = nn.Linear(hidden*2,1)
+        self.router = nn.Linear(hidden,1)
+        self.key = nn.Linear(hidden,hidden)
         self.query = nn.Linear(hidden*2,hidden)
         self.readout = nn.Sequential(nn.LayerNorm(hidden),nn.Linear(hidden,1))
         self.bias = nn.Linear(hidden,1)
@@ -57,7 +58,7 @@ class RelationLoRAComposer(nn.Module):
         low = torch.einsum("nh,srh->nsr",h,self.source_a)*gates
         updates = torch.einsum("nsr,shr->nsh",low,self.source_b)/self.rank
         query = self.query(torch.cat((h,target_h),-1))
-        logits = self.router(torch.cat((edge,query[:,None,:].expand(-1,2,-1)),-1)).squeeze(-1)
+        logits = self.router(edge).squeeze(-1) + (self.key(edge)*query[:,None,:]).sum(-1)/math.sqrt(query.shape[-1])
         mix = torch.softmax(logits.masked_fill(~edge_mask,-1e9),dim=-1)
         adapted = h+self.gain*(updates*mix.unsqueeze(-1)).sum(1)
         pred = (self.readout(adapted)+self.bias(target_h)).squeeze(-1)
