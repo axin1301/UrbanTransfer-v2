@@ -98,6 +98,13 @@ def summarize(a, jobs, status):
 
 
 def run(a):
+    import torch
+    if not a.cpu and not torch.cuda.is_available():
+        raise RuntimeError(
+            "No ROCm/CUDA GPU visible in this job; submit inside a GPU allocation "
+            "or pass --cpu explicitly. Refusing silent CPU training.")
+    print(f"[k7-night] training_device={'CPU (explicit)' if a.cpu else torch.cuda.get_device_name(0)} "
+          f"ROCm={torch.version.hip} CUDA={torch.version.cuda}", flush=True)
     if not a.source_csv.is_file():
         raise FileNotFoundError("Source CSV not found: " + str(a.source_csv))
     if not a.image_root.is_dir():
