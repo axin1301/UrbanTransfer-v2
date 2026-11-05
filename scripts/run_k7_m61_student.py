@@ -174,7 +174,7 @@ def main():
     model.eval()
     results=[]
     for split,subset in (("SCUI",scui),("UCUI",ucui)):
-        out,weights=[],[]
+        out,weights,swapped=[] ,[],[]
         with torch.inference_mode():
             for first in range(0,len(subset),a.batch_size):
                 ix=subset[first:first+a.batch_size]
@@ -183,15 +183,26 @@ def main():
                             return_aux=True)
                 out.append(z.cpu())
                 weights.append(w.cpu())
+                # Frozen-checkpoint intervention: keep visual/context fixed,
+                # cyclically mismatch Education MLLM hidden tokens only.
+                shifted=subset[(np.arange(first,first+len(ix))+1)%len(subset)]
+                wrong=torch.stack([val_tokens[int(i)] for i in shifted]).to(device)
+                changed=model(x[ix].to(device),ctx[ix].to(device),wrong)
+                swapped.append(changed.cpu())
         pred=unseen_stats[0]+unseen_stats[1]*torch.cat(out).numpy()
         truth=y[torch.from_numpy(subset.copy())].numpy()
         metric=scores(pred,truth)
         baseline=float(np.mean((unseen_stats[0]-truth)**2))
-        attention=torch.cat(weights).mean(0).numpy()
+        all_attention=torch.cat(weights).numpy()
+        attention=all_attention.mean(0)
+        mismatch=unseen_stats[1]*torch.mean(
+            torch.abs(torch.cat(out)-torch.cat(swapped))).item()
         results.append({"partition":split,**metric,
                         "relative_mse_to_source_mean":metric["mse_log1p"]/max(baseline,1e-12),
                         "population_weight":float(attention[0]),
-                        "food_weight":float(attention[1])})
+                        "food_weight":float(attention[1]),
+                        "population_weight_std":float(all_attention[:,0].std()),
+                        "mean_abs_prediction_change_mismatched_hidden_log1p":float(mismatch)})
     a.run_dir.mkdir(parents=True,exist_ok=True)
     with (a.run_dir/"metrics.csv").open("w",newline="") as fd:
         writer=csv.DictWriter(fd,fieldnames=list(results[0]))
@@ -213,7 +224,9 @@ def main():
               f"Pearson={row['pearson']:.3f} "
               f"Ratio={row['relative_mse_to_source_mean']:.3f} "
               f"PopWt={row['population_weight']:.3f} "
-              f"FoodWt={row['food_weight']:.3f}",flush=True)
+              f"FoodWt={row['food_weight']:.3f} "
+              f"PopWtStd={row['population_weight_std']:.3f} "
+              f"MismatchChange={row['mean_abs_prediction_change_mismatched_hidden_log1p']:.3f}",flush=True)
     print(f"[k7-m61] COMPLETE {a.run_dir}",flush=True)
 
 
