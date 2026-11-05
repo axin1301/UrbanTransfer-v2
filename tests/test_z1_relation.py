@@ -21,18 +21,21 @@ class Z1RelationTests(unittest.TestCase):
         self.assertFalse(any(a == b for a, b in texts))
         self.assertTrue(all("unverified" in t.lower() for t in texts.values()))
 
-    def test_relation_fold_has_no_heldout_source_edges_in_training(self):
+    def test_relation_pair_binding_and_permutation_are_nontrivial(self):
         tasks = sorted(SOURCE_TASKS)
         held = tasks[0]
+        width = len(tasks)*len(tasks)
         cache = {}
         for i, a in enumerate(tasks):
             for j, b in enumerate(tasks):
                 if a != b:
-                    vec = torch.zeros(len(tasks)*len(tasks))
+                    vec = torch.zeros(width)
                     vec[i*len(tasks)+j] = 1.
                     cache[a, b] = vec
-        normal = fold_relations(cache, held, tasks)
-        shuffled = fold_relations(cache, held, tasks, shuffle=True)
+        identity = {name: torch.randn(width).abs().add(0.1)
+                    for name in tasks}
+        normal = fold_relations(cache, held, tasks, identity)
+        shuffled = fold_relations(cache, held, tasks, identity, shuffle=True)
         self.assertEqual(set(normal), set(tasks))
         self.assertEqual(set(shuffled), set(tasks))
         self.assertTrue(any(not torch.allclose(normal[t], shuffled[t])
@@ -40,10 +43,9 @@ class Z1RelationTests(unittest.TestCase):
         for target in tasks:
             for source in tasks:
                 if source == held or source == target:
-                    if source == held and target == held:
-                        continue
                     index = tasks.index(target)*len(tasks)+tasks.index(source)
                     self.assertEqual(float(normal[target][index]), 0.)
+
 
     def test_relation_model_grads_and_conditioning(self):
         torch.manual_seed(1)
