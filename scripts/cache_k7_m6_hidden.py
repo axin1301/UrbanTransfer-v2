@@ -62,13 +62,12 @@ def selection(frame,seed,train_limit,eval_limit,city_fraction):
 
 
 def jobs(frame,manifest):
-    # Every source-supervised row receives its source task and held-out
+    # Every source-supervised row receives BOTH source tasks and held-out
     # Education prompt. This explicitly exposes target text to training.
     # Evaluation receives only Education prompt, never source labels.
     work=[]
     for idx in manifest["train"]:
-        src=str(frame.iloc[idx].indicator_column)
-        work.extend([(idx,src),(idx,HELDOUT_TASK)])
+        work.extend((idx,task) for task in TASKS)
     for part in ("SCUI","UCUI"):
         work.extend((idx,HELDOUT_TASK) for idx in manifest[part])
     return work
