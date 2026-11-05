@@ -42,6 +42,9 @@ def get_semantics(a):
 
 
 def load_data(a):
+    cache = a.feature_dir/"remoteclip_features.sqlite3"
+    if not cache.is_file():
+        raise FileNotFoundError(f"Frozen RemoteCLIP feature cache missing: {cache}")
     store = FeatureStore(a.feature_dir, encoder_id="RemoteCLIP-" + a.remoteclip_model)
     ds = CachedFeatureDataset(a.source_csv, a.image_root, store,
                               partition="eval", image_column=a.image_column,
