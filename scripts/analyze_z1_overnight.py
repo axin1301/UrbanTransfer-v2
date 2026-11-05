@@ -13,6 +13,8 @@ METRICS = ("mse_log1p", "pearson", "relative_mse_to_source_mean",
            "prediction_bias_oracle", "pred_std_to_true_std_oracle",
            "affine_fitted_mse_ORACLE_NOT_ZERO_SHOT")
 PAIRS = (
+    ("k7_e2", "k7_e1"),
+    ("k7_e2", "k7_e2_shuffle"),
     ("structured_b1", "short_b1"),
     ("structured_b2", "structured_b1"),
     ("structured_b3", "structured_b1"),
