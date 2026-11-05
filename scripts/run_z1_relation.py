@@ -92,7 +92,7 @@ def fold_run(a, task, frame, x, context, y, names, semantics, relation):
     use_relation = a.variant.startswith("relation_")
     rv = None
     if use_relation:
-        rf = fold_relations(relation, task, SOURCE_TASKS,
+        rf = fold_relations(relation, task, SOURCE_TASKS, semantics,
                             shuffle="shuffle" in a.variant)
         rv = torch.stack([rf[n] for n in names])
         dataset = TensorDataset(x[train_idx], context[train_idx],
