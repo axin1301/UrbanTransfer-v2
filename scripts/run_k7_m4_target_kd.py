@@ -187,7 +187,7 @@ def main():
             total+=float(loss.detach().cpu())
             steps+=1
         if epoch==0 or epoch+1==a.epochs or (epoch+1)%5==0:
-            print(f"[k7-m3] epoch={epoch+1}/{a.epochs} loss={total/max(steps,1):.3f}",
+            print(f"[k7-m4] epoch={epoch+1}/{a.epochs} total_loss={total/max(steps,1):.3f}",
                   flush=True)
     model.eval()
     correct,flag=tokens[HELDOUT_TASK]
@@ -196,7 +196,7 @@ def main():
     edge_choices=relation_conditions(correct,generic_tensor)
     results=[]
     for part,indices in (("SCUI",scui),("UCUI",ucui)):
-        print(f"[k7-m3] {part} inference n={len(indices)}",flush=True)
+        print(f"[k7-m4] {part} inference n={len(indices)}",flush=True)
         original=None
         actual=y[indices].numpy()
         for condition,relation in edge_choices.items():
@@ -235,7 +235,7 @@ def main():
               f"{r['mse_log1p']:7.3f} {r['pearson']:8.3f} {r['ratio']:7.3f} "
               f"{r['population_attention']:7.3f} "
               f"{r['food_attention']:7.3f}",flush=True)
-    print(f"[k7-m3] COMPLETE {a.output} (one KD-trained model; three inference texts)",flush=True)
+    print(f"[k7-m4] COMPLETE {a.output} (one KD-trained model; three inference texts)",flush=True)
 
 
 if __name__=="__main__":
