@@ -105,13 +105,15 @@ python -u scripts/run_z1_pilot.py \
   --image-root /PATH/TO/IMAGES \
   --feature-dir /PATH/TO/REMOTECLIP_FEATURE_DIR \
   --semantic-backend hash --allow-hash-smoke \
-  --limit 300 --epochs 1 --batch-size 32 --cpu \
+  --epochs 1 --batch-size 32 --cpu \
   --output runs/z1/hash_smoke_seed42
 \`\`\`
 
 If the CSV contains an explicit image path column, add
-\`--image-column COLUMN_NAME\`. The smoke limit must cover all
-city×indicator strata and enough rows to form each training fold.
+\`--image-column COLUMN_NAME\`. For a smoke run, use all source rows unless you have prepared a
+small, **stratified** source CSV covering every city×indicator stratum.
+The runner's optional --limit reads the first N rows and may not
+preserve stratum coverage.
 
 ### Full frozen-encoder experiment
 
