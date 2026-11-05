@@ -137,3 +137,32 @@ Failure at this stage does not invalidate the full K7 research idea:
 these runs specifically test *relation-conditioned parameter generation*
 with global frozen image features, not the later utility-calibrated
 expert composition or spatially conditional knowledge alignment.
+
+
+## GPU / frozen tensor cache acceleration (Nov 2026)
+
+The unattended driver now checks GPU allocation **before** loading data. It
+fails loudly if no ROCm/CUDA device is visible, unless \`--cpu\` is explicitly
+requested. PyTorch exposes AMD MI250 via the usual \`cuda\` interface.
+
+Instead of rescanning SQLite in every variant/seed, the driver prepares
+\`runs/k7/e1_e2_v1/_source_tensors.pt\` **once**. It resolves source-only tile
+paths, deduplicates tiles, fetches each unique RemoteCLIP vector once, and
+saves source tensors with a source CSV/SQLite metadata fingerprint. The
+initial indexing pass can remain I/O-bound, but has its own progress bar.
+Later conditions use the compact tensor cache, and when GPU memory permits,
+train entirely from GPU-resident tensors; otherwise they stream CPU batches
+to GPU. Progress and device details are now streamed to the main terminal
+and stored in each condition's console.log.
+
+For an in-progress prior version, stop the **old parent/child processes**
+gracefully, then \`git pull --ff-only origin main\` and rerun the **same**
+overnight command. Previous completed folds remain untouched and are skipped.
+Only unfinished folds resume from scratch. The new tensor cache is a
+separate additive artifact; it does not alter experiment config fingerprints.
+Do **not** manually remove fold metrics or prior checkpoints.
+
+If source CSV or SQLite metadata changes after cache creation, cache loading
+will fail rather than reuse stale tensors. Choose a fresh \`--output\`
+directory for a genuinely new source dataset/cache. Do not modify source
+CSV or SQLite while a run is in progress.
