@@ -90,33 +90,37 @@ def relation_embeddings(root, model_id="Qwen/Qwen3-Embedding-0.6B",
     return result
 
 
-def fold_relations(embeddings, held_task, all_tasks, seed=42, shuffle=False):
-    """Aggregate target->eligible-source pair semantics without target-label access.
+def fold_relations(pair_embeddings, held_task, all_tasks, source_semantics,
+                   shuffle=False):
+    """Fold-safe source-identity × relation-message aggregation.
 
-    A negative-control shuffle reassigns *whole aggregated relation profiles*
-    across task identities. Rotating pairwise links within one mean would have
-    no effect; this is deliberately a non-invariant permutation.
+    For a held-out target, query relations to all training source indicators.
+    For each training indicator, only refer to OTHER training indicators.
+    Permuted control rotates relation cards among source identities while
+    keeping target semantics and the source-identity vectors fixed. The
+    identity-conditioned product makes this perturbation non-invariant.
     """
     tasks = tuple(sorted(all_tasks))
     if held_task not in tasks:
         raise ValueError("Unknown heldout task")
     eligible = tuple(t for t in tasks if t != held_task)
+    if not set(tasks).issubset(source_semantics):
+        raise ValueError("Missing source semantics for relation graph")
     answer = {}
     for target in tasks:
         sources = tuple(t for t in eligible if t != target)
-        if not sources:
-            raise ValueError("No eligible relation sources")
-        links = [embeddings[(target, source)] for source in sources]
-        answer[target] = F.normalize(torch.stack(links).mean(0), dim=0)
-    if not shuffle:
-        return answer
-    # Never route the held-out task's semantics into a training task.
-    # Rotate the five training nodes; use a fixed training node for heldout.
-    shuffled = {task: answer[eligible[(i + 1) % len(eligible)]]
-                for i, task in enumerate(eligible)}
-    shuffled[held_task] = answer[eligible[0]]
-    return shuffled
-
+        if len(sources) < 2:
+            raise ValueError("Need multiple relation sources")
+        messages = [F.normalize(pair_embeddings[(target, source)].float(), dim=0)
+                    for source in sources]
+        if shuffle:
+            messages = messages[1:] + messages[:1]
+        # Paired elementwise binding; NOT a simple mean of cards, for which
+        # shuffling source relations would be mathematically invisible.
+        bound = [F.normalize(source_semantics[source].float(), dim=0) * msg
+                 for source, msg in zip(sources, messages)]
+        answer[target] = F.normalize(torch.stack(bound).mean(0), dim=0)
+    return answer
 
 class RelationRegressor(torch.nn.Module):
     """Inject Qwen pairwise-relation messages into a shared zero-shot regressor.
