@@ -91,12 +91,11 @@ def relation_embeddings(root, model_id="Qwen/Qwen3-Embedding-0.6B",
 
 
 def fold_relations(embeddings, held_task, all_tasks, seed=42, shuffle=False):
-    """No held-out target in train nodes' relation contexts.
+    """Aggregate target->eligible-source pair semantics without target-label access.
 
-    Shuffle control permutes relation messages among source *identities*
-    within each target row; source names and all target definitions remain
-    unchanged. As relations may share identical descriptions, assess the
-    strength of this negative control rather than assume it is decisive.
+    A negative-control shuffle reassigns *whole aggregated relation profiles*
+    across task identities. Rotating pairwise links within one mean would have
+    no effect; this is deliberately a non-invariant permutation.
     """
     tasks = tuple(sorted(all_tasks))
     if held_task not in tasks:
@@ -108,9 +107,12 @@ def fold_relations(embeddings, held_task, all_tasks, seed=42, shuffle=False):
         if not sources:
             raise ValueError("No eligible relation sources")
         links = [embeddings[(target, source)] for source in sources]
-        if shuffle:
-            # Rotate messages between nodes; if all edges are identical the
-            # permutation must remain uninformative (explicit limitation).
-            links = links[1:] + links[:1]
         answer[target] = F.normalize(torch.stack(links).mean(0), dim=0)
-    return answer
+    if not shuffle:
+        return answer
+    # Never route the held-out task's semantics into a training task.
+    # Rotate the five training nodes; use a fixed training node for heldout.
+    shuffled = {task: answer[eligible[(i + 1) % len(eligible)]]
+                for i, task in enumerate(eligible)}
+    shuffled[held_task] = answer[eligible[0]]
+    return shuffled
