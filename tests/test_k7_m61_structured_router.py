@@ -6,13 +6,16 @@ import torch.nn.functional as F
 
 from urban_transfer.k7_m61_structured import (
     START_DEF,START_REL,END_REL,find_span,evenly_sample,
-    extract_structured,structured_prompt)
+    extract_structured,structured_prompt,decoded_marker_spans)
 from urban_transfer.k7_m61_router import StructuredMLLMRouter
 
 
 class FakeTokenizer:
     def encode(self,text,add_special_tokens=False):
         return [ord(c) for c in text]
+
+    def decode(self,ids,skip_special_tokens=False,clean_up_tokenization_spaces=False):
+        return "".join("<|image_pad|>" if x==999 else "\\n[" if x==5000 else chr(x) for x in ids)
 
 
 class M61Tests(unittest.TestCase):
@@ -39,6 +42,24 @@ class M61Tests(unittest.TestCase):
         self.assertTrue(torch.equal(out[6],states[100+len(START_DEF)]))
         self.assertTrue(torch.equal(out[10],states[
             100+len(START_DEF)+len("housing details")+len(START_REL)]))
+
+    def test_contextual_marker_tokenization_is_not_standalone(self):
+        # A preceding newline merges with the first '[': standalone
+        # marker IDs cannot match this actual processor input sequence.
+        tokenizer=FakeTokenizer()
+        def merged(marker):
+            return [5000]+[ord(ch) for ch in marker[1:]]
+        ids=([999]*3+merged(START_DEF)+[ord(c) for c in "Housing"]
+             +merged(START_REL)+[ord(c) for c in "Road access"]
+             +merged(END_REL)+[ord(c) for c in "End"])
+        self.assertNotIn(tokenizer.encode(START_DEF),
+                         [ids[i:i+len(START_DEF)] for i in range(len(ids))])
+        spans=decoded_marker_spans(ids,tokenizer)
+        self.assertEqual(len(spans),2)
+        self.assertEqual("".join(chr(ids[i]) for i in spans[0]),"Housing")
+        self.assertEqual("".join(chr(ids[i]) for i in spans[1]),"Road access")
+        out=extract_structured(torch.randn(len(ids),32),ids,999,tokenizer,(3,4,4))
+        self.assertEqual(tuple(out.shape),(11,32))
 
     def test_ambiguous_markers_fail(self):
         with self.assertRaises(ValueError):
