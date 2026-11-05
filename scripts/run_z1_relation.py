@@ -9,6 +9,8 @@ import hashlib
 import json
 import random
 from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import numpy as np
 import torch
@@ -26,7 +28,8 @@ from urban_transfer.z1_relation import RelationRegressor, fold_relations, relati
 
 VARIANTS = (
     "short_b1", "structured_b1", "structured_b3",
-    "relation_b1", "relation_shuffle_b1",
+    "structured_b2", "relation_b1", "relation_shuffle_b1",
+    "relation_b2", "relation_shuffle_b2",
     "relation_b3", "relation_shuffle_b3",
 )
 VERSION = "z1-relation-overnight-v1"
@@ -94,7 +97,8 @@ def fold_run(a, task, frame, x, context, y, names, semantics, relation):
     else:
         dataset = TensorDataset(x[train_idx], context[train_idx],
                                 sv[train_idx], target)
-    mode = "b3" if a.variant.endswith("b3") else "b1"
+    mode = ("b3" if a.variant.endswith("b3") else
+            "b2" if a.variant.endswith("b2") else "b1")
     torch.manual_seed(a.seed)
     device = torch.device("cpu" if a.cpu or not torch.cuda.is_available() else "cuda")
     model = (RelationRegressor(x.shape[1], sv.shape[1], mode, a.hidden, a.rank)
