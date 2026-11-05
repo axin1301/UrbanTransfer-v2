@@ -1,6 +1,7 @@
 """K7 M4: one target-text-aware knowledge distillation training, Education DEV evaluation.
 
-During training, distill target relation knowledge on source-only visuals.\nAfter training, use the SAME checkpoint to compare correct/swapped/generic
+During training, distill target relation knowledge on source-only visuals.
+After training, use the SAME checkpoint to compare correct/swapped/generic
 directed relation texts; no extra fits or heldout-task label tuning.
 """
 import argparse
