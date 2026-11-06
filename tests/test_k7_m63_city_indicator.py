@@ -109,6 +109,42 @@ class M63CityIndicatorTests(unittest.TestCase):
         self.assertLessEqual(
             output["max_abs_transfer_normalized"],.500001)
 
+    def test_epoch_checkpoint_resume_and_completed_training(self):
+        class Args:
+            seed=42
+            epochs=1
+            batch_size=4
+            lr=.001
+            self_loss=.3
+            task_loss=.2
+            target_align_loss=.05
+            residual_penalty=.02
+        signature={"test":"m63-resume","batch_size":4}
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ckpt=Path(temp_dir)/"checkpoint_last.pt"
+            train_m63(
+                self.model,self.x,self.geo,self.y,self.names,
+                np.arange(8),self.stats,self.tokens,Args(),
+                torch.device("cpu"),ckpt,signature)
+            saved=torch.load(ckpt,map_location="cpu",weights_only=True)
+            self.assertEqual(saved["completed_epoch"],1)
+            self.assertEqual(saved["signature"],signature)
+            before={k:v.clone() for k,v in self.model.state_dict().items()}
+            restored=CityIndicatorResidual(
+                12,24,hidden=32,heads=4,group_counts=(6,4,5))
+            train_m63(
+                restored,self.x,self.geo,self.y,self.names,
+                np.arange(8),self.stats,self.tokens,Args(),
+                torch.device("cpu"),ckpt,signature)
+            for name,tensor in before.items():
+                self.assertTrue(torch.equal(
+                    tensor,restored.state_dict()[name]))
+            with self.assertRaisesRegex(ValueError,"mismatch"):
+                train_m63(
+                    restored,self.x,self.geo,self.y,self.names,
+                    np.arange(8),self.stats,self.tokens,Args(),
+                    torch.device("cpu"),ckpt,{"batch_size":256})
+
     def test_task_and_context_shape_guard(self):
         with self.assertRaisesRegex(ValueError,"tokens"):
             self.model(self.x,self.geo,torch.randn(8,14,24))
