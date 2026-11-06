@@ -104,6 +104,15 @@ class CityIndicatorResidual(nn.Module):
         return joint,city,task,fused,attended
 
     def forward(self,visual,context,tokens,mask=None,return_aux=False):
+        # Validate BEFORE invoking the frozen visual anchor: the anchor's
+        # LayerNorm otherwise raises an opaque RuntimeError for malformed
+        # context (e.g. 3 geo fields instead of the required 4).
+        if (visual.ndim!=2 or context.shape!=(len(visual),4) or
+            tokens.ndim!=3 or tokens.shape[0]!=len(visual) or
+            tokens.shape[1]!=sum(self.group_counts)):
+            raise ValueError(
+                "M6.3 expects visual=[B,D], context=[B,4], "
+                "tokens=[B,sum(group_counts),MLLM_dim]")
         base=self.base(visual,context)
         joint,city,task,fused,attended=self.condition(
             visual,context,tokens)
