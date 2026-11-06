@@ -110,10 +110,14 @@ class M63CityIndicatorTests(unittest.TestCase):
             output["max_abs_transfer_normalized"],.500001)
 
     def test_task_and_context_shape_guard(self):
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(ValueError,"tokens"):
             self.model(self.x,self.geo,torch.randn(8,14,24))
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(ValueError,"context"):
             self.model(self.x,torch.randn(8,3),self.h)
+        with self.assertRaisesRegex(ValueError,"context"):
+            self.model(self.x,torch.randn(8,5),self.h)
+        with self.assertRaisesRegex(ValueError,"visual"):
+            self.model(self.x[:7],self.geo,self.h)
 
     def test_pretrained_base_round_trip(self):
         reference=CityIndicatorResidual(
