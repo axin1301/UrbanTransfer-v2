@@ -56,10 +56,10 @@ def split_full(frame,seed=42,city_fraction=.25,source_val_fraction=.10):
             (val if group_idx in validation_tiles else train).extend(
                 rows.tolist())
     source_task=frame.indicator_column.astype(str).to_numpy()
-    for source in TRAIN_TASKS:
-        if min(sum(source_task[np.asarray(part,dtype=np.int64)]==source)
+    for source_name in TRAIN_TASKS:
+        if min(sum(source_task[np.asarray(part,dtype=np.int64)]==source_name)
                for part in (train,val))<2:
-            raise ValueError("Tile-grouped source train/val has too few "+source)
+            raise ValueError("Tile-grouped source train/val has too few "+source_name)
     groups={
         "train":sorted(train),
         "source_val":sorted(val),
