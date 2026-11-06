@@ -8,6 +8,8 @@ A single fixed 20-epoch run (seed42), no target-driven model selection.
 import argparse
 import csv
 import json
+import os
+import time
 import sys
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
@@ -103,7 +105,7 @@ def evaluate_m63(model,split,indices,x,ctx,y,names,stats,
     }
 
 
-def train_m63(model,x,ctx,y,names,train_ids,stats,cache,args,device):
+def train_m63(model,x,ctx,y,names,train_ids,stats,cache,args,device,checkpoint_path=None,signature=None):
     target=source_train_targets(train_ids,names,y,stats)
     source_labels=torch.tensor(
         [TRAIN_TASKS.index(names[int(i)]) for i in train_ids],
@@ -112,12 +114,33 @@ def train_m63(model,x,ctx,y,names,train_ids,stats,cache,args,device):
         [p for p in model.parameters() if p.requires_grad],
         lr=args.lr,weight_decay=1e-4)
     order_rng=torch.Generator().manual_seed(args.seed)
-    for epoch in range(args.epochs):
+    start_epoch=0
+    if checkpoint_path is not None and checkpoint_path.exists():
+        saved=torch.load(checkpoint_path,map_location="cpu",weights_only=True)
+        if saved.get("signature")!=signature or saved.get("version")!=1:
+            raise ValueError("Resume checkpoint settings/manifest/anchor mismatch")
+        start_epoch=int(saved["completed_epoch"])
+        if start_epoch<1 or start_epoch>args.epochs:
+            raise ValueError("Invalid completed_epoch in resume checkpoint")
+        model.load_state_dict(saved["model"],strict=True)
+        optimizer.load_state_dict(saved["optimizer"])
+        order_rng.set_state(saved["order_rng"])
+        torch.set_rng_state(saved["torch_cpu_rng"])
+        if device.type=="cuda":
+            if "torch_cuda_rng" not in saved:
+                raise ValueError("CUDA RNG state missing from checkpoint")
+            torch.cuda.set_rng_state(saved["torch_cuda_rng"],device)
+        print(f"[k7-m63] RESUME completed_epoch={start_epoch} "
+              f"remaining={args.epochs-start_epoch}",flush=True)
+    for epoch in range(start_epoch,args.epochs):
+        epoch_started=time.monotonic()
+        print(f"[k7-m63] epoch={epoch+1}/{args.epochs} START",flush=True)
         model.train()
         # Base has no dropout/batchnorm, but must remain in eval mode.
         model.base.eval()
         order=torch.randperm(len(train_ids),generator=order_rng)
         losses=[]
+        n_batches=(len(train_ids)+args.batch_size-1)//args.batch_size
         for start in range(0,len(train_ids),args.batch_size):
             batch=order[start:start+args.batch_size]
             ix=train_ids[batch.numpy()]
@@ -150,9 +173,33 @@ def train_m63(model,x,ctx,y,names,train_ids,stats,cache,args,device):
                 [p for p in model.parameters() if p.requires_grad],2.)
             optimizer.step()
             losses.append(float(loss.detach().cpu()))
-        if epoch==0 or (epoch+1)%5==0 or epoch+1==args.epochs:
-            print(f"[k7-m63] epoch={epoch+1}/{args.epochs} "
-                  f"source_loss={np.mean(losses):.5f}",flush=True)
+            batch_number=start//args.batch_size+1
+            if batch_number%50==0 or batch_number==n_batches:
+                print(f"[k7-m63] epoch={epoch+1}/{args.epochs} "
+                      f"batch={batch_number}/{n_batches} "
+                      f"elapsed_s={time.monotonic()-epoch_started:.1f}",
+                      flush=True)
+        if checkpoint_path is not None:
+            progress={
+                "version":1,
+                "signature":signature,
+                "completed_epoch":epoch+1,
+                "model":{k:v.detach().cpu().clone()
+                         for k,v in model.state_dict().items()},
+                "optimizer":optimizer.state_dict(),
+                "order_rng":order_rng.get_state(),
+                "torch_cpu_rng":torch.get_rng_state(),
+            }
+            if device.type=="cuda":
+                progress["torch_cuda_rng"]=torch.cuda.get_rng_state(device)
+            temporary=checkpoint_path.with_name(
+                checkpoint_path.name+".tmp")
+            torch.save(progress,temporary)
+            os.replace(temporary,checkpoint_path)
+        print(f"[k7-m63] epoch={epoch+1}/{args.epochs} "
+              f"source_loss={np.mean(losses):.5f} "
+              f"elapsed_s={time.monotonic()-epoch_started:.1f} "
+              f"checkpoint_saved={checkpoint_path is not None}",flush=True)
     model.eval()
 
 
@@ -183,10 +230,16 @@ def main():
         or args.target_align_loss!=.05
         or args.residual_penalty!=.02 or args.max_residual!=.5):
         p.error("Fixed first M6.3 experiment settings required")
-    if (args.output.exists() or
-        args.output.resolve() in {
-            args.full_dir.resolve(),args.reference_dir.resolve()}):
-        raise FileExistsError("M6.3 requires a new independent output dir")
+    if args.output.resolve() in {
+            args.full_dir.resolve(),args.reference_dir.resolve()}:
+        raise ValueError("M6.3 output must differ from caches and reference")
+    checkpoint_path=args.output/"checkpoint_last.pt"
+    if args.output.exists() and not checkpoint_path.is_file():
+        raise FileExistsError(
+            "M6.3 output exists without resumable checkpoint; "
+            "use a distinct --output path")
+    if (args.output/"metrics.csv").exists():
+        raise FileExistsError("M6.3 run already completed; refusing retrain")
     if args.device=="cuda" and not torch.cuda.is_available():
         raise RuntimeError("ROCm MI250 GPU unavailable")
     torch.manual_seed(args.seed)
@@ -236,8 +289,17 @@ def main():
           f"UCUI={len(splits['UCUI'])} "
           f"frozen_visual_anchor=1 max_residual={args.max_residual}",
           flush=True)
+    signature={
+        "manifest":str(manifest_path.resolve()),
+        "anchor":str((args.reference_dir/"visual_only.pt").resolve()),
+        **{key:getattr(args,key) for key in (
+            "seed","epochs","batch_size","hidden","heads","lr",
+            "self_loss","task_loss","target_align_loss",
+            "residual_penalty","max_residual")}
+    }
+    args.output.mkdir(parents=True,exist_ok=True)
     train_m63(model,x,ctx,y,names,train_ids,stats,
-              token_cache,args,device)
+              token_cache,args,device,checkpoint_path,signature)
     # Label arrays for Education are consulted ONLY AFTER training ends.
     metrics=[]
     for split in ("source_val","SCUI","UCSI","UCUI"):
@@ -256,7 +318,6 @@ def main():
         reference={row["partition"]:row
                    for row in csv.DictReader(inp)
                    if row["model"]=="visual_only"}
-    args.output.mkdir(parents=True,exist_ok=False)
     torch.save({
         "model":{k:v.detach().cpu() for k,v in model.state_dict().items()},
         "seed":args.seed,"epochs":args.epochs,
