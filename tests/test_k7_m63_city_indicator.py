@@ -8,7 +8,7 @@ import torch
 from torch.nn import functional as F
 
 from scripts.run_k7_m62_full import source_train_targets
-from scripts.run_k7_m63_full import train_m63,evaluate_m63
+from scripts.run_k7_m63_full import train_m63,evaluate_m63,validate_training_settings
 from urban_transfer.k7_m1_knowledge import TRAIN_TASKS,HELDOUT_TASK
 from urban_transfer.k7_m63_city_indicator_residual import CityIndicatorResidual
 
@@ -144,6 +144,31 @@ class M63CityIndicatorTests(unittest.TestCase):
                     restored,self.x,self.geo,self.y,self.names,
                     np.arange(8),self.stats,self.tokens,Args(),
                     torch.device("cpu"),ckpt,{"batch_size":256})
+
+    def test_batch_size_256_and_512_allowed_but_invalid_settings_rejected(self):
+        class Args:
+            seed=42
+            epochs=20
+            batch_size=128
+            hidden=128
+            heads=4
+            lr=.001
+            self_loss=.3
+            task_loss=.2
+            target_align_loss=.05
+            residual_penalty=.02
+            max_residual=.5
+        for batch in (128,256,512):
+            Args.batch_size=batch
+            validate_training_settings(Args())
+        for batch in (0,1025):
+            Args.batch_size=batch
+            with self.assertRaises(ValueError):
+                validate_training_settings(Args())
+        Args.batch_size=256
+        Args.lr=.002
+        with self.assertRaises(ValueError):
+            validate_training_settings(Args())
 
     def test_task_and_context_shape_guard(self):
         with self.assertRaisesRegex(ValueError,"tokens"):
