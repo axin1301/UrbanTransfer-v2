@@ -107,6 +107,41 @@ python -u scripts/run_k7_m63_full.py \
   --device cuda
 ```
 
+### Faster data path, compatible with existing checkpoints
+
+The M6.3 trainer now uses a **persistent, read-only SQLite
+connection**, retains up to 512 CPU-cached fp32 hidden arrays
+(~256 MiB for [64,2048] arrays), and fetches Population/Food/
+Education tokens once each for a source minibatch; source-task
+tokens reuse exactly the matching Pop/Food array. This removes
+one redundant full token batch and thousands of SQLite opens.
+
+No network weights, optimizer update formula, random sampling,
+loss terms, or checkpoint signature keys were changed.
+Resume an already-created `batch256` epoch checkpoint using
+the **same original command and output folder**. Progress logs
+show `read_s` and `compute_s` per epoch/50 batches.
+These are wall-clock approximate Python timing partitions:
+`read_s` includes disk, decode and GPU enqueue;
+`compute_s` includes subsequent GPU synchronization.
+
+```bash
+git pull --ff-only origin main
+python -m unittest discover -s tests -p 'test_k7_m63_city_indicator.py' -v
+python -u scripts/run_k7_m63_full.py \
+  --full-dir runs/k7/m62_full_seed42 \
+  --reference-dir runs/k7/m62_full_models_seed42 \
+  --output runs/k7/m63_city_indicator_full_seed42_bs256 \
+  --seed 42 --epochs 20 --batch-size 256 --device cuda
+```
+
+If `checkpoint_last.pt` records completed_epoch=1,
+the resumed run starts Epoch 2. Already running Python
+processes must be stopped and relaunched to load modified code.
+Do not delete or rename the existing checkpoint and never
+resume with a different batch size or output folder. Stop an
+old process at an epoch boundary after its checkpoint is written.
+
 ### Larger batches (separate training run)
 
 `--batch-size 256` or `--batch-size 512` is now permitted.
