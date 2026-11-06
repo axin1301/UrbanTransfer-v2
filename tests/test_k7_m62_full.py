@@ -44,6 +44,15 @@ class FullM62Tests(unittest.TestCase):
         tasks=set(self.frame.iloc[splits["UCUI"]].indicator_column)
         self.assertEqual(tasks,{HELDOUT_TASK})
 
+    def test_source_mask_remains_boolean_after_task_checks(self):
+        manifest=split_full(self.frame,42,.25,.20)
+        source=self.frame.indicator_column.astype(str).isin(TRAIN_TASKS)
+        unseen=self.frame.city.astype(str).isin(manifest["held_cities"])
+        expected=set(self.frame.index[source & unseen].tolist())
+        self.assertEqual(set(manifest["UCSI"]),expected)
+        self.assertTrue(set(self.frame.iloc[manifest["UCSI"]]
+                            .indicator_column)==set(TRAIN_TASKS))
+
     def test_manifest_cache_jobs_include_train_three_tasks(self):
         a=split_full(self.frame)
         work=build_job_index(self.frame,a)
