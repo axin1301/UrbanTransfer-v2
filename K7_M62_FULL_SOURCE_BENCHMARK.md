@@ -100,7 +100,11 @@ choose a different split, use a NEW directory.
 
 ```bash
 python -u scripts/cache_k7_m62_full.py \
-  --run-dir runs/k7/m62_full_seed42 --audit-only
+  --run-dir runs/k7/m62_full_seed42 \\
+  --reuse-sqlite \\
+    runs/k7/m61_structured_seed42/hidden.sqlite3 \\
+    runs/k7/m62_fixed_comparison_seed42/ucsi_hidden.sqlite3 \\
+  --audit-only
 ```
 
 It prints `requests, unique_keys, cached, missing, raw_GiB`.
