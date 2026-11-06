@@ -107,7 +107,7 @@ python -u scripts/run_k7_m63_full.py \
   --device cuda
 ```
 
-The script requires existing M6.2 full cache/manifest, full
+**Auto-resume:** The script now prints progress every 50 mini-batches and\nfor **every epoch**, and atomically saves\n`runs/k7/m63_city_indicator_full_seed42/checkpoint_last.pt`\nafter each COMPLETED epoch. Re-run the same command to resume\nfrom its next epoch; all settings including batch size must match.\nA preemption in the middle of an epoch repeats only that epoch.\nRuns started with the OLD version have no intermediate checkpoint\nand cannot recover their previous work. Do not alter `--batch-size`\nfrom 128 within a run.\n\nThe script requires existing M6.2 full cache/manifest, full
 Visual-only checkpoint and source-only shared tensor features.
 It refuses overwriting the output directory and checks anchor
 checkpoint/manifest identity.
