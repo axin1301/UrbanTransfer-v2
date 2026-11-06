@@ -46,6 +46,8 @@ def main():
     p.add_argument("--run-dir",type=Path,
                    default=Path("runs/k7/m62_full_seed42"))
     p.add_argument("--audit-only",action="store_true")
+    p.add_argument("--reuse-sqlite",type=Path,nargs="*",default=[],
+                   help="Read-only existing M6.1/UCSI SQLite caches; safe key-based reuse")
     a=p.parse_args()
     manifest=json.loads((a.run_dir/"full_manifest.json").read_text())
     if manifest["seed"]!=42:
@@ -58,17 +60,39 @@ def main():
                          partition="eval")
     jobs=schedule_jobs(frame,manifest,ds)
     store=HiddenStore(a.run_dir/"hidden.sqlite3")
+    prior=[]
+    for old_path in a.reuse_sqlite:
+        if not old_path.is_file():
+            raise FileNotFoundError("Reuse cache absent: "+str(old_path))
+        if old_path.resolve()==(a.run_dir/"hidden.sqlite3").resolve():
+            raise ValueError("Do not reuse the destination DB as an external cache")
+        prior.append(HiddenStore(old_path))
     missing=[]
+    reusable=[]
+    cached=0
     for image_path,task,key in tqdm(jobs,desc="Inspect Qwen hidden cache keys"):
-        if store.get(key) is None:
+        if store.get(key) is not None:
+            cached+=1
+            continue
+        found=None
+        for old in prior:
+            found=old.get(key)
+            if found is not None:
+                break
+        if found is None:
             missing.append((image_path,task,key))
+        else:
+            reusable.append((key,task,found))
+
     raw_gib=len(jobs)*sum(manifest["group_counts"])*2048*2/(1024**3)
     print(f"[k7-full-cache] requests={manifest['n_encoding_requests_before_dedup']} "
-          f"unique_keys={len(jobs)} cached={len(jobs)-len(missing)} "
-          f"missing={len(missing)} raw_GiB={raw_gib:.2f}",flush=True)
+          f"unique_keys={len(jobs)} cached={cached} "
+          f"reusable={len(reusable)} missing={len(missing)} raw_GiB={raw_gib:.2f}",flush=True)
     if a.audit_only:
         print("[k7-full-cache] AUDIT ONLY: no Qwen-VL model loaded",flush=True)
         return
+    for key,task,found in tqdm(reusable,desc="Copy existing frozen hidden keys"):
+        store.put(key,task,found)
     if missing:
         encoder=StructuredFrozenMLLM(
             manifest["model_id"],max_pixels=int(manifest["max_pixels"]))
