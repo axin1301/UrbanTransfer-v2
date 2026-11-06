@@ -107,7 +107,7 @@ python -u scripts/cache_k7_m62_full.py \
   --audit-only
 ```
 
-It prints `requests, unique_keys, cached, missing, raw_GiB`.
+It prints `requests, unique_keys, cached, reusable, missing, raw_GiB`. Reuse paths must exist; omit any absent old SQLite file. Audit mode never copies hidden arrays or loads Qwen-VL.
 Each Qwen2.5-VL cached sample costs **256 KiB** raw fp16
 (hidden shape 64×2048). Exact unique content keys matter because
 many indicator rows may refer to the same physical satellite tile.
@@ -121,7 +121,10 @@ has been measured by the assistant.
 
 ```bash
 python -u scripts/cache_k7_m62_full.py \
-  --run-dir runs/k7/m62_full_seed42
+  --run-dir runs/k7/m62_full_seed42 \
+  --reuse-sqlite \
+    runs/k7/m61_structured_seed42/hidden.sqlite3 \
+    runs/k7/m62_fixed_comparison_seed42/ucsi_hidden.sqlite3
 ```
 
 Frozen Qwen2.5-VL-3B Instruct, BF16, eager attention; M6.1
