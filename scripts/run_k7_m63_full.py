@@ -9,6 +9,7 @@ import argparse
 import csv
 import json
 import os
+import sqlite3
 import time
 import sys
 from pathlib import Path
@@ -25,6 +26,56 @@ from urban_transfer.k7_feature_cache import read_tensor_cache
 from urban_transfer.k7_m1_knowledge import TRAIN_TASKS,HELDOUT_TASK
 from urban_transfer.k7_mllm_hidden import HiddenStore
 from urban_transfer.k7_m63_city_indicator_residual import CityIndicatorResidual
+
+
+class PersistentReadOnlyHiddenStore:
+    """Persistent read-only SQLite handle, identical decode to HiddenStore.get.
+
+    This only changes I/O; it does not rewrite cached arrays or model inputs.
+    Reopening a SQLite connection for every 256-KiB hidden array on a
+    distributed filesystem is needlessly expensive.
+    """
+    def __init__(self,path):
+        self.path=Path(path).resolve()
+        if not self.path.is_file():
+            raise FileNotFoundError("Frozen Qwen-VL cache missing: "+str(self.path))
+        self.connection=sqlite3.connect(
+            self.path.as_uri()+"?mode=ro",uri=True,timeout=60)
+
+    def get(self,key):
+        row=self.connection.execute(
+            "SELECT n_tokens,dim,values_blob FROM hidden WHERE cache_key=?",
+            (key,)).fetchone()
+        if row is None:
+            return None
+        n,d,blob=row
+        if len(blob)!=n*d*2:
+            raise ValueError("Corrupt MLLM cache blob")
+        return torch.from_numpy(
+            np.frombuffer(blob,dtype="<f2").astype("float32")
+              .reshape(n,d).copy())
+
+    def close(self):
+        self.connection.close()
+
+
+def load_training_tokens(cache,ids,names,device):
+    """Three read requests per row, instead of four; same Source tokens.
+
+    All tasks are fetched for the same source tiles; the per-row Source
+    task is exactly either Population or Food. Reusing the corresponding
+    tensor has identical values/gradient behaviour (tokens are frozen).
+    """
+    pop=cache.batch(ids,[TRAIN_TASKS[0]]*len(ids),device)
+    food=cache.batch(ids,[TRAIN_TASKS[1]]*len(ids),device)
+    edu=cache.batch(ids,[HELDOUT_TASK]*len(ids),device)
+    source_is_pop=torch.as_tensor(
+        [names[int(i)]==TRAIN_TASKS[0] for i in ids],
+        dtype=torch.bool,device=device)
+    if not all(names[int(i)] in TRAIN_TASKS for i in ids):
+        raise ValueError("Source training batch contains a non-source indicator")
+    source=torch.where(source_is_pop[:,None,None],pop,food)
+    return source,pop,food,edu
 
 
 def read_reference(reference_dir,manifest_path,manifest):
@@ -141,6 +192,8 @@ def train_m63(model,x,ctx,y,names,train_ids,stats,cache,args,device,checkpoint_p
         order=torch.randperm(len(train_ids),generator=order_rng)
         losses=[]
         n_batches=(len(train_ids)+args.batch_size-1)//args.batch_size
+        cumulative_read_s=0.
+        cumulative_compute_s=0.
         for start in range(0,len(train_ids),args.batch_size):
             batch=order[start:start+args.batch_size]
             ix=train_ids[batch.numpy()]
@@ -148,10 +201,12 @@ def train_m63(model,x,ctx,y,names,train_ids,stats,cache,args,device,checkpoint_p
             context=ctx[ix].to(device)
             yy=target[batch].to(device)
             source_idx=source_labels[batch].to(device)
-            source_h=cache.batch(ix,[names[int(i)] for i in ix],device)
-            pop_h=cache.batch(ix,[TRAIN_TASKS[0]]*len(ix),device)
-            food_h=cache.batch(ix,[TRAIN_TASKS[1]]*len(ix),device)
-            edu_h=cache.batch(ix,[HELDOUT_TASK]*len(ix),device)
+            read_started=time.monotonic()
+            source_h,pop_h,food_h,edu_h=load_training_tokens(
+                cache,ix,names,device)
+            # A transferred tensor may still be in flight; this sync
+            # happens once after each batch's training computation below.
+            data_ready=time.monotonic()
             optimizer.zero_grad(set_to_none=True)
             prediction,w,task,fused,baseline,delta=model(
                 v,context,source_h,return_aux=True)
@@ -173,11 +228,15 @@ def train_m63(model,x,ctx,y,names,train_ids,stats,cache,args,device,checkpoint_p
                 [p for p in model.parameters() if p.requires_grad],2.)
             optimizer.step()
             losses.append(float(loss.detach().cpu()))
+            cumulative_read_s+=data_ready-read_started
+            cumulative_compute_s+=time.monotonic()-data_ready
             batch_number=start//args.batch_size+1
             if batch_number%50==0 or batch_number==n_batches:
                 print(f"[k7-m63] epoch={epoch+1}/{args.epochs} "
                       f"batch={batch_number}/{n_batches} "
-                      f"elapsed_s={time.monotonic()-epoch_started:.1f}",
+                      f"elapsed_s={time.monotonic()-epoch_started:.1f} "
+                      f"read_s={cumulative_read_s:.1f} "
+                      f"compute_s={cumulative_compute_s:.1f}",
                       flush=True)
         if checkpoint_path is not None:
             progress={
@@ -199,6 +258,8 @@ def train_m63(model,x,ctx,y,names,train_ids,stats,cache,args,device,checkpoint_p
         print(f"[k7-m63] epoch={epoch+1}/{args.epochs} "
               f"source_loss={np.mean(losses):.5f} "
               f"elapsed_s={time.monotonic()-epoch_started:.1f} "
+              f"read_s={cumulative_read_s:.1f} "
+              f"compute_s={cumulative_compute_s:.1f} "
               f"checkpoint_saved={checkpoint_path is not None}",flush=True)
     model.eval()
 
@@ -277,8 +338,12 @@ def main():
     if (len(ds.df)!=len(frame) or
         names!=ds.df.indicator_column.astype(str).tolist()):
         raise ValueError("Shared visual source cache ordering mismatch")
+    # Persistent read-only SQLite and a bounded 512-entry float32
+    # CPU LRU (~256 MiB at 64x2048); checkpoint format is unchanged.
     token_cache=CachedTokens(
-        frame,ds,manifest,HiddenStore(args.full_dir/"hidden.sqlite3"))
+        frame,ds,manifest,
+        PersistentReadOnlyHiddenStore(args.full_dir/"hidden.sqlite3"),
+        maxsize=512)
     sample=token_cache[int(train_ids[0]),names[int(train_ids[0])]]
     device=torch.device(args.device)
     model=CityIndicatorResidual(
