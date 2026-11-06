@@ -107,6 +107,31 @@ python -u scripts/run_k7_m63_full.py \
   --device cuda
 ```
 
+### Larger batches (separate training run)
+
+`--batch-size 256` or `--batch-size 512` is now permitted.
+Use an entirely NEW `--output` directory when changing batch
+size, e.g.:
+
+```bash
+python -u scripts/run_k7_m63_full.py \
+  --full-dir runs/k7/m62_full_seed42 \
+  --reference-dir runs/k7/m62_full_models_seed42 \
+  --output runs/k7/m63_city_indicator_full_seed42_bs256 \
+  --seed 42 --epochs 20 --batch-size 256 --device cuda
+```
+
+This starts a **new** training trajectory; it cannot continue a
+batch128 checkpoint. Batch size is part of the resume signature,
+so re-running this SAME command resumes the batch256 run.
+With 27,732 source rows, batch128 is 217 optimization steps
+per epoch; batch256 is 109. Increasing batch size may reduce
+overhead but increases peak GPU memory and changes gradient
+noise/optimization steps, hence is not a runtime-only change.
+The current SQLite accesses/extra forwards can still dominate.
+Start with batch256; batch512 only if memory is sufficient and
+comparison objectives justify a distinct run.
+
 **Auto-resume:** The script now prints progress every 50 mini-batches and\nfor **every epoch**, and atomically saves\n`runs/k7/m63_city_indicator_full_seed42/checkpoint_last.pt`\nafter each COMPLETED epoch. Re-run the same command to resume\nfrom its next epoch; all settings including batch size must match.\nA preemption in the middle of an epoch repeats only that epoch.\nRuns started with the OLD version have no intermediate checkpoint\nand cannot recover their previous work. Do not alter `--batch-size`\nfrom 128 within a run.\n\nThe script requires existing M6.2 full cache/manifest, full
 Visual-only checkpoint and source-only shared tensor features.
 It refuses overwriting the output directory and checks anchor
