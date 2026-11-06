@@ -32,23 +32,34 @@ def split_full(frame,seed=42,city_fraction=.25,source_val_fraction=.10):
     candidates=np.flatnonzero(source & ~unseen)
     if not len(candidates) or not (source & unseen).any():
         raise ValueError("Missing seen/held city source tasks")
-    # Independent SOURCE-only validation by city×source-indicator strata.
-    # The validation sample isn't used for any optimization; stratified
-    # within seen cities, not for Education/model selection.
+    # SOURCE-only validation is grouped by physical tile identity, not
+    # independent CSV rows. A Population and Food observation of the
+    # same satellite tile must NEVER cross train/source_val.
+    # Geographic city holdout remains disjoint by construction.
     val=[]
     train=[]
-    for (_,indicator),group in frame.iloc[candidates].groupby(
-        ["city","indicator_column"],sort=True):
-        original=group.index.to_numpy(dtype=np.int64)
-        shuffled=np.random.default_rng(
-            seed+int(hashlib.sha256(
-                (str(group.iloc[0].city)+"|"+indicator).encode()
-            ).hexdigest()[:8],16)).permutation(original)
-        n=max(1,int(round(len(shuffled)*source_val_fraction)))
-        if n>=len(shuffled):
-            raise ValueError("Source city×indicator stratum too small for train/val")
-        val.extend(shuffled[:n].tolist())
-        train.extend(shuffled[n:].tolist())
+    source_rows=frame.iloc[candidates]
+    for city,city_rows in source_rows.groupby("city",sort=True):
+        tile_groups=[
+            group.index.to_numpy(dtype=np.int64)
+            for _,group in city_rows.groupby("image_name",sort=True)
+        ]
+        if len(tile_groups)<2:
+            raise ValueError("Need >=2 unique source tiles per seen city")
+        signature=hashlib.sha256(str(city).encode()).hexdigest()
+        city_rng=np.random.default_rng(seed+int(signature[:8],16))
+        order=city_rng.permutation(len(tile_groups))
+        n=max(1,min(len(tile_groups)-1,
+                    int(round(len(tile_groups)*source_val_fraction))))
+        validation_tiles=set(order[:n].tolist())
+        for group_idx,rows in enumerate(tile_groups):
+            (val if group_idx in validation_tiles else train).extend(
+                rows.tolist())
+    source_task=frame.indicator_column.astype(str).to_numpy()
+    for source in TRAIN_TASKS:
+        if min(sum(source_task[np.asarray(part,dtype=np.int64)]==source)
+               for part in (train,val))<2:
+            raise ValueError("Tile-grouped source train/val has too few "+source)
     groups={
         "train":sorted(train),
         "source_val":sorted(val),
