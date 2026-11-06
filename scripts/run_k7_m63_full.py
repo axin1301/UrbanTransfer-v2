@@ -203,6 +203,23 @@ def train_m63(model,x,ctx,y,names,train_ids,stats,cache,args,device,checkpoint_p
     model.eval()
 
 
+def validate_training_settings(args):
+    """Keep the fixed research recipe while allowing an explicit batch experiment.
+
+    A changed batch size changes optimization steps and is a NEW run;
+    exact batch size is already enforced by resume checkpoint signature.
+    """
+    if (args.seed!=42 or args.epochs!=20 or
+        args.batch_size<1 or args.batch_size>1024
+        or args.hidden!=128 or args.heads!=4 or args.lr!=.001
+        or args.self_loss!=.3 or args.task_loss!=.2
+        or args.target_align_loss!=.05
+        or args.residual_penalty!=.02 or args.max_residual!=.5):
+        raise ValueError(
+            "Fixed M6.3 research settings required; "
+            "--batch-size can be 1..1024 for a separate run")
+
+
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument("--full-dir",type=Path,
@@ -224,12 +241,10 @@ def main():
     p.add_argument("--max-residual",type=float,default=.5)
     p.add_argument("--device",choices=("cpu","cuda"),default="cuda")
     args=p.parse_args()
-    if (args.seed!=42 or args.epochs!=20 or args.batch_size!=128
-        or args.hidden!=128 or args.heads!=4 or args.lr!=.001
-        or args.self_loss!=.3 or args.task_loss!=.2
-        or args.target_align_loss!=.05
-        or args.residual_penalty!=.02 or args.max_residual!=.5):
-        p.error("Fixed first M6.3 experiment settings required")
+    try:
+        validate_training_settings(args)
+    except ValueError as exc:
+        p.error(str(exc))
     if args.output.resolve() in {
             args.full_dir.resolve(),args.reference_dir.resolve()}:
         raise ValueError("M6.3 output must differ from caches and reference")
