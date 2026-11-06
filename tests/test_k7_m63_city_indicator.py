@@ -1,6 +1,7 @@
 """M6.3 source-only CPU unit tests: frozen visual anchor + bounded transfer."""
 import tempfile
 import unittest
+import sqlite3
 from pathlib import Path
 
 import numpy as np
@@ -8,7 +9,7 @@ import torch
 from torch.nn import functional as F
 
 from scripts.run_k7_m62_full import source_train_targets
-from scripts.run_k7_m63_full import train_m63,evaluate_m63,validate_training_settings
+from scripts.run_k7_m63_full import (\n    train_m63,evaluate_m63,validate_training_settings,\n    load_training_tokens,PersistentReadOnlyHiddenStore)
 from urban_transfer.k7_m1_knowledge import TRAIN_TASKS,HELDOUT_TASK
 from urban_transfer.k7_m63_city_indicator_residual import CityIndicatorResidual
 
@@ -37,6 +38,35 @@ class M63CityIndicatorTests(unittest.TestCase):
         self.h=self.tokens.batch(
             np.arange(8),self.names,"cpu")
         self.stats={t:(0.,1.) for t in TRAIN_TASKS}
+
+    def test_three_task_load_equivalent_to_original_four_reads(self):
+        ids=np.arange(8)
+        source,pop,food,edu=load_training_tokens(
+            self.tokens,ids,self.names,torch.device("cpu"))
+        original=self.tokens.batch(ids,self.names,"cpu")
+        self.assertTrue(torch.equal(source,original))
+        self.assertTrue(torch.equal(
+            pop,self.tokens.batch(ids,[TRAIN_TASKS[0]]*8,"cpu")))
+        self.assertTrue(torch.equal(
+            food,self.tokens.batch(ids,[TRAIN_TASKS[1]]*8,"cpu")))
+        self.assertTrue(torch.equal(
+            edu,self.tokens.batch(ids,[HELDOUT_TASK]*8,"cpu")))
+
+    def test_persistent_sqlite_decodes_same_as_existing_hidden_store(self):
+        from urban_transfer.k7_mllm_hidden import HiddenStore
+        with tempfile.TemporaryDirectory() as folder:
+            db=Path(folder)/"source_hidden.sqlite3"
+            store=HiddenStore(db)
+            expected=torch.randn(15,24)
+            store.put("k",TRAIN_TASKS[0],expected)
+            old=store.get("k")
+            persistent=PersistentReadOnlyHiddenStore(db)
+            try:
+                got=persistent.get("k")
+                self.assertTrue(torch.equal(old,got))
+                self.assertIsNone(persistent.get("absent"))
+            finally:
+                persistent.close()
 
     def test_initial_prediction_exactly_matches_anchor(self):
         with torch.inference_mode():
