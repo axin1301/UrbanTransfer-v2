@@ -90,8 +90,8 @@ def manifest_main(args):
     frame,_,_,_,names=read_tensor_cache(
         args.tensor_cache,args.train_csv,args.image_root,args.feature_dir,
         args.remoteclip_model)
-    if set(names)!=set((*TRAIN_TASKS,HELDOUT_TASK)):
-        raise ValueError("Expected Population/Food/Education-only source study")
+    if not set((*TRAIN_TASKS,HELDOUT_TASK)).issubset(set(names)):
+        raise ValueError("Source CSV must include Population/Food/Education; other indicators remain excluded from this M6.2 study")
     split=split_full(frame,args.seed,args.city_fraction,args.source_val_fraction)
     jobs=build_job_index(frame,split)
     # Approximate source image counts only. Paths and real hash keys
