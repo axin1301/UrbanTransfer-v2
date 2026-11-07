@@ -95,9 +95,14 @@ class M65Tests(unittest.TestCase):
         self.assertTrue(torch.equal(pred,base))
         self.assertTrue(torch.equal(delta,torch.zeros_like(delta)))
         self.assertEqual(tuple(weight.shape),(6,2))
+        # LayerNorm is invariant to adding the same constant to every
+        # channel: nb+2 is NOT a valid neighborhood-sensitivity test.
+        # Perturb the spatial feature pattern, not its global offset.
+        altered=nb.clone()
+        altered[:,:12]=-altered[:,:12]
         with torch.no_grad():
             city_a=model.condition(x,geo,tokens,nb)[1]
-            city_b=model.condition(x,geo,tokens,nb+2)[1]
+            city_b=model.condition(x,geo,tokens,altered)[1]
         self.assertGreater(float((city_a-city_b).abs().mean()),1e-6)
 
     def test_student_source_training_backward(self):
