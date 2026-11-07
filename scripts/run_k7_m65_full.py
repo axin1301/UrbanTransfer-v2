@@ -214,7 +214,10 @@ def main():
         raise RuntimeError("GPU unavailable")
     checkpoint=args.output/"checkpoint_last.pt"
     if args.output.exists() and not checkpoint.is_file():
-        raise FileExistsError("Output exists without resumable checkpoint")
+        if not (args.stage=="dev" and
+                (args.output/"dev_visual_anchor.pt").is_file()):
+            raise FileExistsError(
+                "Output exists without resumable checkpoint or dev anchor")
     if (args.output/"metrics.csv").is_file():
         raise FileExistsError("M6.5 stage already complete")
     manifest_path=(args.full_dir/"full_manifest.json").resolve()
@@ -248,17 +251,43 @@ def main():
             base_args=SimpleNamespace(
                 seed=42,epochs=20,batch_size=256,hidden=128,
                 heads=4,lr=.001,self_loss=.3)
-            print(f"[k7-m65] DEV fresh visual anchor training "
-                  f"train={len(train_ids)} held_source={len(eval_ids)} "
-                  f"cities={held_cities}",flush=True)
-            # do_fit needs text embedding dims even for visual_only;
-            # no text cache/model inference required in this branch.
-            dummy={t:torch.zeros(1) for t in TRAIN_TASKS}
-            visual_anchor=do_fit(
-                "visual_only",manifest,x,ctx,y,names,train_ids,
-                stats,dummy,cache,base_args,device)
-            anchor_state={k:v.detach().cpu()
-                          for k,v in visual_anchor.state_dict().items()}
+            anchor_path=args.output/"dev_visual_anchor.pt"
+            anchor_signature={
+                "manifest":str(manifest_path),
+                "train_hash":hashlib.sha256(
+                    np.asarray(train_ids,dtype=np.int64).tobytes()).hexdigest(),
+                "epochs":20,"batch_size":256,"seed":42,
+                "hidden":128,"lr":.001,"source_stats":stats,
+            }
+            if anchor_path.is_file():
+                saved=torch.load(anchor_path,map_location="cpu",
+                                 weights_only=True)
+                if saved["signature"]!=anchor_signature:
+                    raise ValueError("Existing dev anchor source-city split mismatch")
+                anchor_state=saved["model"]
+                print(f"[k7-m65] DEV visual anchor HIT {anchor_path}",flush=True)
+            else:
+                if checkpoint.is_file():
+                    raise FileNotFoundError(
+                        "M6.5 dev checkpoint exists but its leak-free "
+                        "source-city visual anchor is absent")
+                print(f"[k7-m65] DEV fresh visual anchor training "
+                      f"train={len(train_ids)} held_source={len(eval_ids)} "
+                      f"cities={held_cities}",flush=True)
+                # do_fit needs embedding dimensions even for visual_only;
+                # this branch has no language inference or target labels.
+                dummy={t:torch.zeros(1) for t in TRAIN_TASKS}
+                visual_anchor=do_fit(
+                    "visual_only",manifest,x,ctx,y,names,train_ids,
+                    stats,dummy,cache,base_args,device)
+                anchor_state={k:v.detach().cpu().clone()
+                              for k,v in visual_anchor.state_dict().items()}
+                args.output.mkdir(parents=True,exist_ok=True)
+                temp=anchor_path.with_name(anchor_path.name+".tmp")
+                torch.save({"signature":anchor_signature,
+                            "model":anchor_state},temp)
+                os.replace(temp,anchor_path)
+                print(f"[k7-m65] DEV visual anchor SAVED {anchor_path}",flush=True)
             target_stats=(0.,1.)  # unused: dev labels only Pop/Food
         else:
             train_ids=splits["train"]
