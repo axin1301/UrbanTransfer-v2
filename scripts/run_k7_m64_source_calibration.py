@@ -17,6 +17,7 @@ import argparse
 import csv
 import json
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
@@ -100,14 +101,21 @@ def apply_calibration(pred,indices,names,source_affine,weights):
 
 
 @torch.inference_mode()
-def predict_normalized(model,x,ctx,indices,names,cache,batch_size,device):
+def predict_normalized(model,x,ctx,indices,names,cache,batch_size,device,stage='inference'):
     outputs=[]
     model.eval()
+    start_time=time.monotonic()
+    n_batches=(len(indices)+batch_size-1)//batch_size
+    print(f'[k7-m64] {stage} START n={len(indices)} batches={n_batches}',flush=True)
     for start in range(0,len(indices),batch_size):
         ix=indices[start:start+batch_size]
         h=cache.batch(ix,[names[int(i)] for i in ix],device)
         outputs.append(model(x[ix].to(device),ctx[ix].to(device),h)
                        .detach().cpu().numpy())
+        batch_no=start//batch_size+1
+        if batch_no%10==0 or batch_no==n_batches:
+            print(f'[k7-m64] {stage} batch={batch_no}/{n_batches} '
+                  f'elapsed_s={time.monotonic()-start_time:.1f}',flush=True)
     return np.concatenate(outputs)
 
 
@@ -172,6 +180,7 @@ def main():
         raise FileExistsError("M6.4 output already exists; use new directory")
     if args.device=="cuda" and not torch.cuda.is_available():
         raise RuntimeError("GPU unavailable")
+    print("[k7-m64] loading frozen source tensors and M6.3 checkpoint",flush=True)
     manifest_path=(args.full_dir/"full_manifest.json").resolve()
     manifest=json.loads(manifest_path.read_text())
     frame,x,ctx,y,names=read_tensor_cache(
@@ -212,12 +221,14 @@ def main():
         # Predict source train first. Only source labels are indexed below.
         train_ids=splits["train"]
         train_z=predict_normalized(
-            model,x,ctx,train_ids,names,cache,args.batch_size,args.device)
+            model,x,ctx,train_ids,names,cache,args.batch_size,args.device,
+            stage='source_train_fit_inference')
         all_predictions=np.empty(len(frame),dtype=np.float64)
         all_predictions.fill(np.nan)
         all_predictions[train_ids]=train_z
         source_fit=fit_source_affine(
             all_predictions,y.numpy(),names,train_ids,stats)
+        print('[k7-m64] source affine coefficients fitted from Pop/Food train only',flush=True)
         embeddings=qwen_task_vectors(
             root=args.text_cache_dir,model_id=args.text_model,
             profile="short",only_cached=True)
@@ -234,7 +245,8 @@ def main():
         for split in partitions:
             ix=splits[split]
             all_predictions[ix]=predict_normalized(
-                model,x,ctx,ix,names,cache,args.batch_size,args.device)
+                model,x,ctx,ix,names,cache,args.batch_size,args.device,
+                stage=split)
             for mode in ("original","calibrated"):
                 results.append(score_pair(
                     split,mode,ix,all_predictions,names,y.numpy(),
