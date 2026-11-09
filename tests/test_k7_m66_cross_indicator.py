@@ -86,8 +86,14 @@ class M66Tests(unittest.TestCase):
                       x,context,tokens,nb,neighbors,
                       distance[:6],mask[:6]))
             loss.backward()
-            self.assertIsNotNone(
-                model.neighbor_semantic_project[1].weight.grad)
+            if mode=="cross_indicator":
+                self.assertIsNotNone(
+                    model.neighbor_semantic_project[1].weight.grad)
+            else:
+                # The spatial-only arm deliberately bypasses fixed
+                # cross-indicator prompt prototypes.
+                self.assertIsNone(
+                    model.neighbor_semantic_project[1].weight.grad)
             self.assertTrue(all(not p.requires_grad
                                 for p in model.base.parameters()))
             results.append({
