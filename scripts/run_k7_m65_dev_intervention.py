@@ -115,6 +115,16 @@ def compare_rows(all_rows):
     return records
 
 
+def display_rows_3dp(rows):
+    """Round only serialized floating metrics; retain full precision in analysis."""
+    return [
+        {key:(f"{value:.3f}" if isinstance(value,(float,np.floating))
+              else value)
+         for key,value in row.items()}
+        for row in rows
+    ]
+
+
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument("--full-dir",type=Path,
@@ -200,21 +210,21 @@ def main():
                                 "reproduction: "+part+" / "+key)
                 metrics.append(result)
                 print(f"[k7-m65-intervene] {condition:14s} {task:22s} "
-                      f"n={len(ids)} MSE={result['mse_log1p']:.4f} "
-                      f"Pearson={result['pearson']:.4f} "
-                      f"bias={result['mean_bias_log1p']:+.4f} "
-                      f"pred_std={result['pred_std']:.4f} "
+                      f"n={len(ids)} MSE={result['mse_log1p']:.3f} "
+                      f"Pearson={result['pearson']:.3f} "
+                      f"bias={result['mean_bias_log1p']:+.3f} "
+                      f"pred_std={result['pred_std']:.3f} "
                       f"elapsed_s={time.monotonic()-started:.1f}",flush=True)
         comparison=compare_rows(metrics)
         args.output.mkdir(parents=True,exist_ok=False)
         with (args.output/"metrics.csv").open("w",newline="") as handle:
             writer=csv.DictWriter(handle,fieldnames=list(metrics[0]))
             writer.writeheader()
-            writer.writerows(metrics)
+            writer.writerows(display_rows_3dp(metrics))
         with (args.output/"comparison.csv").open("w",newline="") as handle:
             writer=csv.DictWriter(handle,fieldnames=list(comparison[0]))
             writer.writeheader()
-            writer.writerows(comparison)
+            writer.writerows(display_rows_3dp(comparison))
         (args.output/"config.json").write_text(json.dumps({
             "experiment":"m65_frozen_dev_neighborhood_intervention_v1",
             "manifest":str(manifest_path),
