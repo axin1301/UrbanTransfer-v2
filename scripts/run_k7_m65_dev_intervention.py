@@ -143,7 +143,20 @@ def main():
     if args.device=="cuda" and not torch.cuda.is_available():
         raise RuntimeError("No GPU available")
     if args.output.exists():
-        raise FileExistsError("Choose a fresh output directory for intervention")
+        if not args.output.is_dir():
+            raise FileExistsError("Intervention output path is not a directory")
+        existing=list(args.output.iterdir())
+        if existing:
+            if all((args.output/name).is_file()
+                   for name in ("metrics.csv","comparison.csv","config.json")):
+                print(f"[k7-m65-intervene] ALREADY COMPLETE {args.output}",flush=True)
+                print("[k7-m65-intervene] Read comparison.csv or metrics.csv; no rerun needed",flush=True)
+                return
+            raise FileExistsError(
+                "Intervention output directory contains files but is not "
+                "complete; inspect it or choose another --output path: "
+                +str(args.output))
+        print(f"[k7-m65-intervene] Reusing empty output directory {args.output}",flush=True)
     manifest_path=(args.full_dir/"full_manifest.json").resolve()
     manifest=json.loads(manifest_path.read_text())
     print("[k7-m65-intervene] reading frozen source tensors...",flush=True)
@@ -216,7 +229,7 @@ def main():
                       f"pred_std={result['pred_std']:.3f} "
                       f"elapsed_s={time.monotonic()-started:.1f}",flush=True)
         comparison=compare_rows(metrics)
-        args.output.mkdir(parents=True,exist_ok=False)
+        args.output.mkdir(parents=True,exist_ok=True)
         with (args.output/"metrics.csv").open("w",newline="") as handle:
             writer=csv.DictWriter(handle,fieldnames=list(metrics[0]))
             writer.writeheader()
