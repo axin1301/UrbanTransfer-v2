@@ -39,13 +39,20 @@ def crossfit_source_indicator_predictions(frame,visual,geo,y,names,
     labels=np.asarray(names,dtype=str)
     truth=y.detach().cpu().numpy() if isinstance(y,torch.Tensor) else np.asarray(y)
     out=np.full((len(frame),len(TRAIN_TASKS)),np.nan,dtype=np.float32)
-    source_city=np.isin(cities,unique)
     for column,task in enumerate(TRAIN_TASKS):
         task_ids=ids[labels[ids]==task]
         groups=cities[task_ids]
         means,scale=stats[task]
         z=(truth[task_ids].astype(np.float64)-means)/scale
-        splitter=GroupKFold(n_splits=folds)
+        # The overall source-fit city set may include cities with no
+        # training observations for this particular task. GroupKFold
+        # covers only cities where this task has supervised training rows.
+        # Those other source cities can safely use the full-task fit,
+        # because that fit has never seen their task labels.
+        task_cities=set(groups.tolist())
+        if len(task_cities)<2:
+            raise ValueError("Need >=2 labeled training cities for "+task)
+        splitter=GroupKFold(n_splits=min(folds,len(task_cities)))
         assigned=np.zeros(len(frame),dtype=bool)
         for fold,(fit,held) in enumerate(splitter.split(x[task_ids],z,groups)):
             train_cities=set(groups[fit])
@@ -61,13 +68,19 @@ def crossfit_source_indicator_predictions(frame,visual,geo,y,names,
             out[select,column]=np.asarray(
                 reg.predict(x[select]),dtype=np.float32)
             assigned[select]=True
-        if not np.array_equal(assigned,source_city):
-            raise ValueError("OOF did not cover all source-fit city tiles")
-        other=np.flatnonzero(~source_city)
+        task_city_rows=np.isin(cities,list(task_cities))
+        if not np.array_equal(assigned,task_city_rows):
+            raise ValueError("OOF did not cover all cities labeled for "+task)
+        # All remaining images belong to cities with no training label
+        # for this task, including completely source-held cities.
+        # Full source-task fit is label-safe for these rows only.
+        other=np.flatnonzero(~task_city_rows)
         reg=make_pipeline(StandardScaler(),
                           Ridge(alpha=alpha,solver="lsqr"))
         reg.fit(x[task_ids],z)
         out[other,column]=np.asarray(reg.predict(x[other]),dtype=np.float32)
+        print(f"[m67] {task}: OOF labeled_cities={len(task_cities)} "
+              f"unlabeled_city_rows={len(other)}",flush=True)
     if not np.isfinite(out).all():
         raise ValueError("Nonfinite OOF source indicator predictions")
     return torch.from_numpy(np.clip(out,-5.,5.))
@@ -84,7 +97,7 @@ def load_crossfit_context(frame,visual,geo,y,names,train_ids,stats,
     digest.update(value.tobytes())
     digest.update(json.dumps(stats,sort_keys=True).encode())
     metadata={
-        "schema":"m67_oof_source_indicator_v1",
+        "schema":"m67_oof_source_indicator_v2_task_city_coverage",
         "manifest_sha256":hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
         "source_hash":digest.hexdigest(),"rows":len(frame),
         "visual_dim":visual.shape[-1],"folds":folds,
