@@ -291,10 +291,12 @@ def main():
     parser.add_argument("--seed-start",type=int,default=10001)
     parser.add_argument("--batch-size",type=int,default=256)
     parser.add_argument("--device",choices=("cuda","cpu"),default="cuda")
+    parser.add_argument("--report-only",action="store_true",
+                        help="Summarize already saved predictions only; no GPU inference")
     a=parser.parse_args()
     if not 2<=a.permutations<=200 or a.batch_size<=0:
         parser.error("2-200 permutations and positive batch-size required")
-    if not torch.cuda.is_available() and a.device=="cuda":
+    if not a.report_only and not torch.cuda.is_available() and a.device=="cuda":
         raise RuntimeError("GPU unavailable")
     if a.output.resolve()==a.dev_dir.resolve():
         raise ValueError("Never overwrite the trained M6.5 DEV directory")
@@ -338,6 +340,50 @@ def main():
         config_path.write_text(json.dumps(config,indent=2))
     pred_dir=a.output/"predictions"
     pred_dir.mkdir(exist_ok=True)
+
+    if a.report_only:
+        # Analyze only complete atomic .npz snapshots. Never infer missing
+        # conditions or relabel partial results as a full experiment.
+        paths={"real":pred_dir/"real.npz",
+               "zero":pred_dir/"zero.npz",
+               "city_mean":pred_dir/"city_mean.npz"}
+        if any(not item.is_file() for item in paths.values()):
+            raise FileNotFoundError(
+                "Partial report needs real, zero, and city_mean predictions")
+        available=[]
+        for index in range(a.permutations):
+            name=f"perm_{index:03d}"
+            path=pred_dir/(name+".npz")
+            if path.is_file():
+                available.append(name)
+        if len(available)<2:
+            raise ValueError(
+                "Need at least 2 completed permutations for partial report")
+        # Verify all observed permutations form the contiguous sequence
+        # produced by the fixed-run experiment.
+        expected=[f"perm_{i:03d}" for i in range(len(available))]
+        if available!=expected:
+            raise ValueError("Permutation files have gaps; inspect failed run")
+        snapshots={}
+        for condition,path in list(paths.items())+[
+                (name,pred_dir/(name+".npz")) for name in available]:
+            snapshots[condition]=read_prediction(path,held_ids)
+        truth=y[torch.as_tensor(held_ids)].numpy().astype(np.float64)
+        metrics,city_rows,summary=summarize(
+            frame,held_ids,snapshots,truth,len(available))
+        # Partial reports are strictly separate from final full-run files.
+        write_csv(a.output/"PARTIAL_metrics.csv",metrics)
+        write_csv(a.output/"PARTIAL_per_city.csv",city_rows)
+        write_csv(a.output/"PARTIAL_summary.csv",summary)
+        header=(f"> PARTIAL EXPLORATORY RESULT: {len(available)}/"
+                f"{a.permutations} permutations complete. "
+                "The fixed 20-permutation experiment is NOT complete.\\n\\n")
+        (a.output/"PARTIAL_REPORT.md").write_text(
+            header+report_markdown(summary,len(available)))
+        print(f"[m65-robust] PARTIAL REPORT {len(available)}/"
+              f"{a.permutations} permutations saved to "
+              f"{a.output/'PARTIAL_REPORT.md'}",flush=True)
+        return
 
     ds=ImageUrbanDataset(
         manifest["source_csv"],manifest["image_root"],partition="eval")
