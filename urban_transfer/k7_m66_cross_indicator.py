@@ -6,7 +6,7 @@ target-indicator Query attends neighbor × indicator combinations.
 
 Modes have the SAME parameter count:
   cross_indicator: neighbor × {Pop,Food,Education} semantic prototypes;
-  spatial_only: neighbor × {target target target} (no cross indicators).
+  spatial_only: neighbor × {shared shared shared} pooled semantic baseline.
 Both still include the original M6.5 aggregate-neighborhood vector,
 and both use identical visual-only anchor.
 """
@@ -67,13 +67,16 @@ class NeighborIndicatorInteraction(NeighborhoodCityIndicatorResidual):
         k=neighbor_visual.shape[1]
         h=city.shape[-1]
         image=self.neighbor_visual_project(neighbor_visual.float())
+        projected=self.neighbor_semantic_project(self.semantic_prototypes)
         if self.mode=="cross_indicator":
-            semantics=self.neighbor_semantic_project(
-                self.semantic_prototypes).view(1,1,3,h).expand(b,k,3,h)
+            # The three B identities remain distinct at each neighbor.
+            semantics=projected.view(1,1,3,h).expand(b,k,3,h)
         else:
-            # Spatial-only controlled comparison: all three slots
-            # use the target A representation, not other B indicators.
-            semantics=task.view(b,1,1,h).expand(b,k,3,h)
+            # Identical source prompt prototypes but collapse B identity.
+            # Same parameterized encoder and number of attention slots,
+            # same target-A query, same neighbors and neighborhood vector.
+            pooled=projected.mean(0).view(1,1,1,h)
+            semantics=pooled.expand(b,k,3,h)
         v=image.unsqueeze(2).expand(b,k,3,h)
         dist=self.distance_project(
             neighbor_distance.float().unsqueeze(-1))
