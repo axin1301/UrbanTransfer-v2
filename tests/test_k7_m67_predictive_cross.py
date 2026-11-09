@@ -52,6 +52,38 @@ class M67Tests(unittest.TestCase):
         self.assertTrue(torch.isfinite(base).all())
         self.assertEqual(tuple(base.shape),(len(self.frame),2))
 
+    def test_task_missing_in_one_train_city_is_filled_without_leakage(self):
+        # Source-fit city E has only Population training labels; Food
+        # nevertheless needs predicted values for EVERY physical tile.
+        source_train=np.asarray([
+            i for i in self.train
+            if not (self.frame.city.iloc[int(i)]=="E" and
+                    self.names[int(i)]=="food_accessibility")
+        ],dtype=np.int64)
+        base=crossfit_source_indicator_predictions(
+            self.frame,self.x,self.geo,self.y,self.names,
+            source_train,self.stats)
+        changed=self.y.clone()
+        city_e=self.frame.city.eq("E").to_numpy()
+        changed[city_e]=100000.
+        again=crossfit_source_indicator_predictions(
+            self.frame,self.x,self.geo,changed,self.names,
+            source_train,self.stats)
+        food_ix=TRAIN_TASKS.index("food_accessibility")
+        # E has no Food training labels: its Food predictions come from
+        # full Food fit on the other source-fit cities and remain fixed.
+        np.testing.assert_allclose(
+            base[city_e,food_ix].numpy(),
+            again[city_e,food_ix].numpy(),rtol=0,atol=0)
+        # Source-fit city E still has Population labels, so its
+        # Population predictions are OOF (also city-label isolated).
+        pop_ix=TRAIN_TASKS.index("population_count")
+        np.testing.assert_allclose(
+            base[city_e,pop_ix].numpy(),
+            again[city_e,pop_ix].numpy(),rtol=0,atol=1e-5)
+        self.assertTrue(bool(torch.isfinite(base).all()))
+        self.assertEqual(tuple(base.shape),(len(self.frame),2))
+
     def test_held_city_labels_do_not_affect_context(self):
         base=crossfit_source_indicator_predictions(
             self.frame,self.x,self.geo,self.y,self.names,
