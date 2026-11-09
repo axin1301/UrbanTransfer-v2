@@ -73,6 +73,16 @@ def source_city_comparison(reference_rows,control_rows):
     return output
 
 
+def display_rows_3dp(rows):
+    """Round only serialized floating metrics; retain full precision in analysis."""
+    return [
+        {key:(f"{value:.3f}" if isinstance(value,(float,np.floating))
+              else value)
+         for key,value in row.items()}
+        for row in rows
+    ]
+
+
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument("--full-dir",type=Path,
@@ -200,25 +210,25 @@ def main():
             row["model"]="m65_zero_neighborhood"
             rows.append(row)
             print(f"[k7-m65-ablate] {task} n={len(ids)} "
-                  f"MSE={row['mse_log1p']:.4f} "
-                  f"Pearson={row['pearson']:.4f} "
-                  f"bias={row['mean_bias_log1p']:+.4f}",flush=True)
+                  f"MSE={row['mse_log1p']:.3f} "
+                  f"Pearson={row['pearson']:.3f} "
+                  f"bias={row['mean_bias_log1p']:+.3f}",flush=True)
         compare=source_city_comparison(reference_rows,rows)
         for row in compare:
             if row["metric"] in ("mse_log1p","pearson"):
                 print(f"[k7-m65-ablate] comparison {row['partition']} "
-                      f"{row['metric']} real={row['real_neighborhood']:.4f} "
-                      f"zero={row['zero_neighborhood']:.4f} "
-                      f"real_minus_zero={row['real_minus_zero']:+.4f}",
+                      f"{row['metric']} real={row['real_neighborhood']:.3f} "
+                      f"zero={row['zero_neighborhood']:.3f} "
+                      f"real_minus_zero={row['real_minus_zero']:+.3f}",
                       flush=True)
         with (args.output/"metrics.csv").open("w",newline="") as output:
             writer=csv.DictWriter(output,fieldnames=list(rows[0]))
             writer.writeheader()
-            writer.writerows(rows)
+            writer.writerows(display_rows_3dp(rows))
         with (args.output/"comparison.csv").open("w",newline="") as output:
             writer=csv.DictWriter(output,fieldnames=list(compare[0]))
             writer.writeheader()
-            writer.writerows(compare)
+            writer.writerows(display_rows_3dp(compare))
         (args.output/"config.json").write_text(
             json.dumps({**signature,"reference_dev":str(
                 args.m65_dev_dir.resolve()),
